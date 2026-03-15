@@ -223,7 +223,7 @@ def _user_display(user_id: int) -> str:
 
 # ── Browse helpers ─────────────────────────────────────────────────────────────
 
-BROWSE_PAGE = 20
+BROWSE_PAGE = 30
 
 
 def _car_line(car: dict, idx: int) -> str:
@@ -304,51 +304,35 @@ async def _seed_and_show(
     user_id: int,
     filter_item,
 ) -> None:
-    """Fetch current listings for a new filter, persist their IDs as seen,
-    and send the user a snapshot so they know what already exists."""
+    """Seed seen IDs from current listings, then show first page of results."""
     q = filter_item["q"] if isinstance(filter_item, dict) else filter_item
     year_range = filter_item.get("year") if isinstance(filter_item, dict) else None
 
+    # Fetch a large batch to seed as many existing IDs as possible
     try:
-        cars = await asyncio.to_thread(fetch_cars, q)
+        _, seed_cars = await asyncio.to_thread(fetch_page, q, 0, 100)
     except Exception as e:
         log.error("Seed fetch error user=%s: %s", user_id, e)
-        return
+        seed_cars = []
 
     if year_range:
         lo, hi = year_range
-        cars = [c for c in cars if lo <= (c.get("Year") or 0) <= hi]
+        seed_cars = [c for c in seed_cars if lo <= (c.get("Year") or 0) <= hi]
 
-    # Persist IDs so the scraper won't re-notify them after restart
     seen_ids: set[str] = context.bot_data.setdefault(
         f"seen_{user_id}", load_seen_ids(user_id)
     )
-    for car in cars:
+    for car in seed_cars:
         car_id = str(car.get("Id", ""))
         if car_id:
             seen_ids.add(car_id)
-    if cars:
+    if seed_cars:
         save_seen_ids(user_id, seen_ids)
-        log.info("Seeded %d IDs for user=%s", len(cars), user_id)
+        log.info("Seeded %d IDs for user=%s", len(seed_cars), user_id)
 
-    if not cars:
-        return
-
-    header = f"📋 *{len(cars)} объявлений сейчас:*\n"
-    text = header
-    for i, car in enumerate(cars, 1):
-        line = _car_line(car, i) + "\n"
-        if len(text) + len(line) > 4000:
-            text += f"_...и ещё {len(cars) - i + 1}_"
-            break
-        text += line
-
-    await context.bot.send_message(
-        chat_id=user_id,
-        text=text,
-        parse_mode="Markdown",
-        disable_web_page_preview=True,
-    )
+    # Store filter for pagination and show first page
+    context.bot_data[f"browse_{user_id}"] = filter_item
+    await _send_browse_page(context, user_id, filter_item, offset=0)
 
 
 # ── Keyboards ──────────────────────────────────────────────────────────────────
