@@ -982,6 +982,12 @@ async def scraper_job(context: ContextTypes.DEFAULT_TYPE) -> None:
         seen_ids: set[str] = context.bot_data.setdefault(
             f"seen_{user_id}", load_seen_ids(user_id)
         )
+        # Track which filter queries have been processed at least once this
+        # session. On first encounter we seed seen_ids silently so existing
+        # listings don't trigger a notification.
+        known_queries: set[str] = context.bot_data.setdefault(
+            f"known_queries_{user_id}", set()
+        )
         new_ids: set[str] = set()
 
         # Collect all new cars across all filters, deduped
@@ -1003,6 +1009,18 @@ async def scraper_job(context: ContextTypes.DEFAULT_TYPE) -> None:
             if year_range:
                 lo, hi = year_range
                 cars = [c for c in cars if lo <= (c.get("Year") or 0) <= hi]
+
+            # First time seeing this filter — seed existing listings as seen
+            # without notifying so only cars added AFTER this point trigger alerts.
+            if filter_query not in known_queries:
+                known_queries.add(filter_query)
+                for car in cars:
+                    car_id = str(car.get("Id", ""))
+                    if car_id:
+                        seen_ids.add(car_id)
+                save_seen_ids(user_id, seen_ids)
+                log.info("Seeded %d IDs for new filter user=%s", len(cars), user_id)
+                continue
 
             for car in cars:
                 car_id = str(car.get("Id", ""))
