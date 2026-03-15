@@ -1010,23 +1010,27 @@ async def scraper_job(context: ContextTypes.DEFAULT_TYPE) -> None:
                     new_cars.append(car)
                     new_ids.add(car_id)
 
-        # Send new cars in batches of 20
-        for batch_start in range(0, len(new_cars), 20):
-            batch = new_cars[batch_start: batch_start + 20]
-            lines = [f"🔔 *Найдено новых объявлений: {len(new_cars)}*\n"]
-            for i, car in enumerate(batch, batch_start + 1):
-                lines.append(_car_line(car, i))
-            text = "\n".join(lines)
-            if len(text) > 4000:
-                text = text[:4000] + "\n…"
-            try:
-                await context.bot.send_message(
-                    chat_id=user_id, text=text,
-                    parse_mode="Markdown", disable_web_page_preview=True,
-                )
-                log.info("Alert batch sent to user=%s cars=%d", user_id, len(batch))
-            except Exception as e:
-                log.error("Send error user=%s: %s", user_id, e)
+        # Send all new cars, splitting only at Telegram's 4096 char limit
+        if new_cars:
+            header = f"🔔 *Найдено новых объявлений: {len(new_cars)}*\n"
+            messages, current = [], header
+            for i, car in enumerate(new_cars, 1):
+                line = _car_line(car, i) + "\n"
+                if len(current) + len(line) > 4000:
+                    messages.append(current)
+                    current = line
+                else:
+                    current += line
+            messages.append(current)
+            for msg in messages:
+                try:
+                    await context.bot.send_message(
+                        chat_id=user_id, text=msg,
+                        parse_mode="Markdown", disable_web_page_preview=True,
+                    )
+                except Exception as e:
+                    log.error("Send error user=%s: %s", user_id, e)
+            log.info("Alert sent to user=%s cars=%d msgs=%d", user_id, len(new_cars), len(messages))
 
         if new_ids:
             seen_ids |= new_ids
