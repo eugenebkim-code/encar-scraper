@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+run.ps1
+seen_ids.json
+users/
+filters.json
+*.log

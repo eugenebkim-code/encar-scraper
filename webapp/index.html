@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <title>Encar Filter Builder</title>
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #ffffff;
+      --surface: #f4f4f5;
+      --border: #e4e4e7;
+      --accent: #2563eb;
+      --text: #18181b;
+      --muted: #71717a;
+      --radius: 10px;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      font-size: 15px;
+    }
+
+    .app {
+      display: flex;
+      flex-direction: column;
+      min-height: 100dvh;
+      padding: 16px 16px 24px;
+      gap: 18px;
+    }
+
+    h1 { font-size: 18px; font-weight: 700; }
+
+    .section { display: flex; flex-direction: column; gap: 8px; }
+
+    .section-label {
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+    }
+
+    select {
+      width: 100%;
+      padding: 11px 12px;
+      border: 1.5px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--surface);
+      color: var(--text);
+      font-size: 15px;
+      appearance: none;
+      -webkit-appearance: none;
+      outline: none;
+      transition: border-color 0.15s;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%2371717a' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 12px center;
+      padding-right: 32px;
+    }
+    select:focus { border-color: var(--accent); }
+
+    .chips { display: flex; flex-wrap: wrap; gap: 7px; }
+
+    .chip {
+      padding: 7px 13px;
+      border: 1.5px solid var(--border);
+      border-radius: 20px;
+      font-size: 13px;
+      cursor: pointer;
+      background: var(--surface);
+      color: var(--text);
+      transition: all 0.12s;
+      user-select: none;
+      white-space: nowrap;
+      line-height: 1.3;
+    }
+    .chip:active { opacity: 0.7; }
+    .chip.on {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+      font-weight: 500;
+    }
+    .chip.any { color: var(--muted); }
+    .chip.any.on { color: #fff; font-weight: 500; }
+
+    .count-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 14px;
+      background: var(--surface);
+      border-radius: var(--radius);
+      border: 1.5px solid var(--border);
+    }
+    .count-num {
+      font-size: 22px;
+      font-weight: 700;
+      color: var(--accent);
+      min-width: 60px;
+    }
+    .count-label { font-size: 13px; color: var(--muted); }
+
+    .spinner {
+      display: inline-block;
+      width: 18px; height: 18px;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .btn-submit {
+      padding: 14px;
+      border: none;
+      border-radius: var(--radius);
+      background: var(--accent);
+      color: #fff;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.15s;
+      margin-top: auto;
+    }
+    .btn-submit:disabled { opacity: 0.35; cursor: not-allowed; }
+
+    .note { font-size: 12px; color: var(--muted); line-height: 1.5; }
+    .error-msg { font-size: 13px; color: #dc2626; }
+    .loading-msg { font-size: 14px; color: var(--muted); padding: 40px 0; text-align: center; }
+  </style>
+</head>
+<body>
+<div id="app"></div>
+
+<script>
+const { createApp, ref, computed, watch, onMounted } = Vue;
+
+// ── Translations ──────────────────────────────────────────────────────────────
+const MFR_EN = {
+  // 국산
+  "기아":"Kia","현대":"Hyundai","제네시스":"Genesis",
+  "르노코리아(삼성)":"Renault Korea","KG모빌리티(쌍용)":"KG Mobility","기타":"Other (Domestic)",
+  // 독일
+  "BMW":"BMW","벤츠":"Mercedes-Benz","아우디":"Audi","폭스바겐":"Volkswagen",
+  "포르쉐":"Porsche","미니":"MINI","스마트":"Smart","마이바흐":"Maybach","오펠":"Opel",
+  // 스웨덴
+  "볼보":"Volvo","폴스타":"Polestar","사브":"Saab",
+  // 영국
+  "랜드로버":"Land Rover","재규어":"Jaguar","벤틀리":"Bentley","롤스로이스":"Rolls-Royce",
+  "애스턴마틴":"Aston Martin","맥라렌":"McLaren","로터스":"Lotus","이네오스":"Ineos","MG":"MG",
+  // 일본
+  "도요타":"Toyota","렉서스":"Lexus","혼다":"Honda","닛산":"Nissan","인피니티":"Infiniti",
+  "마쯔다":"Mazda","스바루":"Subaru","미쓰비시":"Mitsubishi","스즈키":"Suzuki",
+  "다이하츠":"Daihatsu","이스즈":"Isuzu","미쓰오카":"Mitsuoka","아큐라":"Acura",
+  // 미국
+  "포드":"Ford","지프":"Jeep","캐딜락":"Cadillac","링컨":"Lincoln","닷지":"Dodge",
+  "GMC":"GMC","뷰익":"Buick","크라이슬러":"Chrysler","허머":"Hummer","폰티악":"Pontiac",
+  "새턴":"Saturn","올즈모빌":"Oldsmobile","머큐리":"Mercury","테슬라":"Tesla",
+  // 이탈리아
+  "페라리":"Ferrari","람보르기니":"Lamborghini","마세라티":"Maserati",
+  "알파 로메오":"Alfa Romeo","피아트":"Fiat","파가니":"Pagani",
+  // 프랑스
+  "푸조":"Peugeot","시트로엥":"Citroën","르노":"Renault",
+  // 하이퍼카
+  "부가티":"Bugatti","쾨니그세그":"Koenigsegg",
+  // 중국
+  "BYD":"BYD","동풍소콘":"Dongfeng Sokon","지리":"Geely","포톤":"Photon",
+  "베이징은하":"BAIC Silver Coin","신원":"Xin Yuan",
+};
+
+const FUEL_EN = {
+  "가솔린":"Gasoline","디젤":"Diesel","LPG":"LPG","전기":"Electric","수소":"Hydrogen",
+  "가솔린+전기":"Hybrid (Gas+EV)","디젤+전기":"Hybrid (Diesel+EV)","가솔린+LPG":"Gas+LPG",
+  "LPG(일반인 구입)":"LPG (Public)","CNG":"CNG",
+};
+
+const REGION_EN = {
+  "서울":"Seoul","경기":"Gyeonggi","인천":"Incheon","부산":"Busan","대구":"Daegu",
+  "광주":"Gwangju","대전":"Daejeon","울산":"Ulsan","강원":"Gangwon","충북":"N. Chungcheong",
+  "충남":"S. Chungcheong","전북":"N. Jeolla","전남":"S. Jeolla","경북":"N. Gyeongsang",
+  "경남":"S. Gyeongsang","제주":"Jeju","세종":"Sejong",
+};
+
+const MODEL_NAMES = {
+  "쏘나타":"Sonata","그랜저":"Grandeur","아반떼":"Avante","투싼":"Tucson","싼타페":"Santa Fe",
+  "팰리세이드":"Palisade","코나":"Kona","아이오닉":"Ioniq","넥쏘":"Nexo","캐스퍼":"Casper",
+  "베뉴":"Venue","스타리아":"Staria","포터":"Porter","봉고":"Bongo","스포티지":"Sportage",
+  "쏘렌토":"Sorento","카니발":"Carnival","스팅어":"Stinger","셀토스":"Seltos","니로":"Niro",
+  "스토닉":"Stonic","레이":"Ray","모닝":"Morning","모하비":"Mohave","쏘울":"Soul",
+  "오피러스":"Opirus","에쿠스":"Equus","제네시스":"Genesis (model)",
+};
+
+function translateModel(name) {
+  if (!name) return "";
+  name = name.replace("더 뉴 ","The New ").replace("올 뉴 ","All New ").replace("뉴 ","New ");
+  const sorted = Object.entries(MODEL_NAMES).sort((a,b) => b[0].length - a[0].length);
+  for (const [kr, en] of sorted) name = name.replaceAll(kr, en);
+  name = name.replace("플러그인 하이브리드","PHEV").replace("하이브리드","Hybrid").replace("일렉트릭","Electric");
+  name = name.replace(/(\d+)세대/g, (_,n) => `${["1st","2nd","3rd","4th","5th"][n-1]||n+"th"} Gen`);
+  return name.trim();
+}
+
+// ── Option tables ─────────────────────────────────────────────────────────────
+const PRICE_OPTIONS = [
+  {label:"Any",value:null},{label:"≤1,000만",value:[0,1000]},{label:"≤2,000만",value:[0,2000]},
+  {label:"≤3,000만",value:[0,3000]},{label:"≤5,000만",value:[0,5000]},
+  {label:"1,000–3,000만",value:[1000,3000]},{label:"2,000–5,000만",value:[2000,5000]},
+  {label:"5,000만+",value:[5000,99999]},
+];
+const YEAR_OPTIONS = [
+  {label:"Any",value:null},{label:"2020+",value:[202001,209912]},{label:"2022+",value:[202201,209912]},
+  {label:"2023+",value:[202301,209912]},{label:"2018–2022",value:[201801,202212]},
+  {label:"2015–2020",value:[201501,202012]},
+];
+const MILEAGE_OPTIONS = [
+  {label:"Any",value:null},{label:"≤30k km",value:[0,30000]},{label:"≤50k km",value:[0,50000]},
+  {label:"≤100k km",value:[0,100000]},{label:"≤150k km",value:[0,150000]},
+];
+
+// ── App ───────────────────────────────────────────────────────────────────────
+createApp({
+  setup() {
+    const catalog = ref(null);
+    const loadError = ref("");
+
+    const manufacturer = ref("");
+    const model = ref(null);
+    const badge = ref(null);
+    const fuelType = ref(null);
+    const region = ref(null);
+    const price = ref(null);
+    const year = ref(null);
+    const mileage = ref(null);
+
+    const badgeOptions = ref([]);
+    const badgesLoading = ref(false);
+
+    const liveCount = ref(null);
+    const countLoading = ref(false);
+    let countTimer = null;
+
+    // ── Catalog-derived lists ─────────────────────────────────────────────────
+    const manufacturers = computed(() => {
+      if (!catalog.value) return [];
+      return Object.keys(catalog.value.manufacturers || {}).sort();
+    });
+
+    const mfrEntry = computed(() => {
+      if (!manufacturer.value || !catalog.value) return {};
+      return (catalog.value.manufacturers || {})[manufacturer.value] || {};
+    });
+
+    const carType = computed(() => mfrEntry.value.car_type || "Y");
+    const models = computed(() => mfrEntry.value.models || []);
+
+    const fuelTypes = computed(() => {
+      const local = mfrEntry.value.fuel_types;
+      if (local && local.length) return local;
+      return catalog.value?._global_filters?.FuelType?.values || [];
+    });
+
+    const regions = computed(() => {
+      const gf = catalog.value?._global_filters || {};
+      const r = new Set([
+        ...(gf.OfficeCityState?.values || []),
+        ...(gf.OfficeCityState_extra?.values || []),
+      ]);
+      return [...r].sort();
+    });
+
+    // ── Query builder ─────────────────────────────────────────────────────────
+    function buildQuery({ includeBadge = true } = {}) {
+      if (!manufacturer.value) return "";
+      const parts = [];
+      if (model.value)               parts.push(`Model.${model.value}.`);
+      if (includeBadge && badge.value) parts.push(`Badge.${badge.value}.`);
+      if (fuelType.value)            parts.push(`FuelType.${fuelType.value}.`);
+      if (region.value)              parts.push(`OfficeCityState.${region.value}.`);
+      if (price.value)               parts.push(`Price.${price.value[0]}|${price.value[1]}.`);
+      if (mileage.value)             parts.push(`Mileage.${mileage.value[0]}|${mileage.value[1]}.`);
+      const extraStr = parts.map(p => `_.${p}`).join("");
+      return `(And.(And.Hidden.N._.(C.CarType.${carType.value}._.Manufacturer.${manufacturer.value}.))${extraStr})`;
+    }
+
+    // ── Badge loader ──────────────────────────────────────────────────────────
+    async function fetchBadges() {
+      if (!model.value) { badgeOptions.value = []; return; }
+      const q = buildQuery({ includeBadge: false });
+      if (!q) return;
+      badgesLoading.value = true;
+      badgeOptions.value = [];
+      try {
+        const res = await fetch(`/api/badges?q=${encodeURIComponent(q)}`);
+        const data = await res.json();
+        badgeOptions.value = data.badges ?? [];
+      } catch { badgeOptions.value = []; }
+      finally { badgesLoading.value = false; }
+    }
+
+    // ── Live count ────────────────────────────────────────────────────────────
+    async function fetchCount() {
+      const q = buildQuery();
+      if (!q) { liveCount.value = null; return; }
+      countLoading.value = true;
+      try {
+        const res = await fetch(`/api/count?q=${encodeURIComponent(q)}`);
+        const data = await res.json();
+        liveCount.value = data.count ?? null;
+      } catch { liveCount.value = null; }
+      finally { countLoading.value = false; }
+    }
+
+    function scheduleFetch() {
+      clearTimeout(countTimer);
+      liveCount.value = null;
+      countTimer = setTimeout(fetchCount, 700);
+    }
+
+    watch([manufacturer, model, fuelType, region, price, mileage], scheduleFetch);
+
+    // Reset dependent fields on manufacturer/model change
+    watch(manufacturer, () => { model.value = null; badge.value = null; fuelType.value = null; badgeOptions.value = []; });
+    watch(model, () => { badge.value = null; fetchBadges(); });;
+
+    // ── Submit ────────────────────────────────────────────────────────────────
+    const canSubmit = computed(() => !!manufacturer.value);
+
+    function submit() {
+      if (!canSubmit.value) return;
+      const payload = {
+        manufacturer: manufacturer.value,
+        car_type: carType.value,
+        model: model.value || null,
+        badge: badge.value || null,
+        fuel_type: fuelType.value || null,
+        region: region.value || null,
+        price: price.value || null,
+        mileage: mileage.value || null,
+        year: year.value || null,
+      };
+      if (window.Telegram?.WebApp?.sendData) {
+        window.Telegram.WebApp.sendData(JSON.stringify(payload));
+      } else {
+        alert("Dev mode — payload:\n" + JSON.stringify(payload, null, 2));
+      }
+    }
+
+    // ── Mount ─────────────────────────────────────────────────────────────────
+    onMounted(async () => {
+      const tg = window.Telegram?.WebApp;
+      if (tg) {
+        tg.ready();
+        tg.expand();
+        const tp = tg.themeParams || {};
+        const s = document.documentElement.style;
+        if (tp.bg_color)            s.setProperty("--bg", tp.bg_color);
+        if (tp.secondary_bg_color)  s.setProperty("--surface", tp.secondary_bg_color);
+        if (tp.text_color)          s.setProperty("--text", tp.text_color);
+        if (tp.hint_color)          s.setProperty("--muted", tp.hint_color);
+        if (tp.button_color)        s.setProperty("--accent", tp.button_color);
+      }
+      try {
+        const res = await fetch("/catalog.json");
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        catalog.value = await res.json();
+      } catch (e) {
+        loadError.value = `Failed to load catalog: ${e.message}`;
+      }
+    });
+
+    return {
+      catalog, loadError,
+      manufacturer, model, badge, fuelType, region, price, year, mileage,
+      manufacturers, models, badgeOptions, badgesLoading, fuelTypes, regions,
+      PRICE_OPTIONS, YEAR_OPTIONS, MILEAGE_OPTIONS,
+      liveCount, countLoading, canSubmit, submit,
+      mfrLabel: k => MFR_EN[k] || k,
+      modelLabel: translateModel,
+      fuelLabel: k => FUEL_EN[k] || k,
+      regionLabel: k => REGION_EN[k] || k,
+      eq: (a, b) => JSON.stringify(a) === JSON.stringify(b),
+    };
+  },
+
+  template: `
+    <div class="app">
+      <h1>🔍 Filter Builder</h1>
+
+      <div v-if="loadError" class="error-msg">{{ loadError }}</div>
+      <div v-else-if="!catalog" class="loading-msg">Loading catalog…</div>
+
+      <template v-if="catalog">
+
+        <!-- Manufacturer -->
+        <div class="section">
+          <div class="section-label">Manufacturer *</div>
+          <select v-model="manufacturer">
+            <option value="">— Select manufacturer —</option>
+            <option v-for="m in manufacturers" :key="m" :value="m">{{ mfrLabel(m) }}</option>
+          </select>
+        </div>
+
+        <!-- Model -->
+        <div class="section" v-if="manufacturer && models.length">
+          <div class="section-label">Model</div>
+          <div class="chips">
+            <span class="chip any" :class="{on:!model}" @click="model=null">Any</span>
+            <span
+              v-for="m in models" :key="m"
+              class="chip" :class="{on:model===m}"
+              @click="model=m"
+            >{{ modelLabel(m) }}</span>
+          </div>
+        </div>
+
+        <!-- Detailed Model (Badge) -->
+        <div class="section" v-if="model">
+          <div class="section-label">Detailed Model</div>
+          <div v-if="badgesLoading" class="spinner"></div>
+          <div class="chips" v-else-if="badgeOptions.length">
+            <span class="chip any" :class="{on:!badge}" @click="badge=null">Any</span>
+            <span
+              v-for="b in badgeOptions" :key="b"
+              class="chip" :class="{on:badge===b}"
+              @click="badge=b"
+            >{{ b }}</span>
+          </div>
+          <div v-else class="note">No detailed models found</div>
+        </div>
+
+        <!-- Fuel Type -->
+        <div class="section" v-if="manufacturer && fuelTypes.length">
+          <div class="section-label">Fuel Type</div>
+          <div class="chips">
+            <span class="chip any" :class="{on:!fuelType}" @click="fuelType=null">Any</span>
+            <span
+              v-for="f in fuelTypes" :key="f"
+              class="chip" :class="{on:fuelType===f}"
+              @click="fuelType=f"
+            >{{ fuelLabel(f) }}</span>
+          </div>
+        </div>
+
+        <!-- Region -->
+        <div class="section" v-if="manufacturer">
+          <div class="section-label">Region</div>
+          <div class="chips">
+            <span class="chip any" :class="{on:!region}" @click="region=null">Any</span>
+            <span
+              v-for="r in regions" :key="r"
+              class="chip" :class="{on:region===r}"
+              @click="region=r"
+            >{{ regionLabel(r) }}</span>
+          </div>
+        </div>
+
+        <!-- Price -->
+        <div class="section" v-if="manufacturer">
+          <div class="section-label">Price (만 KRW)</div>
+          <div class="chips">
+            <span
+              v-for="opt in PRICE_OPTIONS" :key="opt.label"
+              class="chip" :class="{on:eq(price,opt.value), any:!opt.value}"
+              @click="price=opt.value"
+            >{{ opt.label }}</span>
+          </div>
+        </div>
+
+        <!-- Year -->
+        <div class="section" v-if="manufacturer">
+          <div class="section-label">Year</div>
+          <div class="chips">
+            <span
+              v-for="opt in YEAR_OPTIONS" :key="opt.label"
+              class="chip" :class="{on:eq(year,opt.value), any:!opt.value}"
+              @click="year=opt.value"
+            >{{ opt.label }}</span>
+          </div>
+          <div class="note">Year is applied locally after fetching (API limitation)</div>
+        </div>
+
+        <!-- Mileage -->
+        <div class="section" v-if="manufacturer">
+          <div class="section-label">Mileage</div>
+          <div class="chips">
+            <span
+              v-for="opt in MILEAGE_OPTIONS" :key="opt.label"
+              class="chip" :class="{on:eq(mileage,opt.value), any:!opt.value}"
+              @click="mileage=opt.value"
+            >{{ opt.label }}</span>
+          </div>
+        </div>
+
+        <!-- Live count -->
+        <div class="count-row" v-if="manufacturer">
+          <div v-if="countLoading" class="spinner"></div>
+          <div v-else-if="liveCount !== null" class="count-num">{{ liveCount.toLocaleString() }}</div>
+          <div v-else class="count-num" style="color:var(--muted)">—</div>
+          <div class="count-label">matching listings on Encar</div>
+        </div>
+
+        <!-- Submit -->
+        <button class="btn-submit" :disabled="!canSubmit" @click="submit">
+          ✅ Add Filter
+        </button>
+
+      </template>
+    </div>
+  `,
+}).mount("#app");
+</script>
+</body>
+</html>

@@ -1,0 +1,1092 @@
+"""Telegram bot: per-user filter management + scraper job + admin panel."""
+
+import asyncio
+import datetime
+import hashlib
+import hmac
+import json
+import logging
+import os
+import re
+
+from telegram import (
+    InlineKeyboardButton, InlineKeyboardMarkup, Update,
+    KeyboardButton, ReplyKeyboardMarkup, WebAppInfo,
+)
+from telegram.ext import (
+    Application,
+    CallbackQueryHandler,
+    CommandHandler,
+    ConversationHandler,
+    ContextTypes,
+    MessageHandler,
+    filters as tg_filters,
+)
+
+from scraper import fetch_cars, fetch_page, get_listing_url
+from storage import (
+    load_filters, save_filters,
+    load_seen_ids, save_seen_ids,
+    save_user_info, load_user_info,
+    list_all_users,
+)
+from translations import (
+    MANUFACTURER_EN, FUEL_TYPE_EN, REGION_EN,
+    translate_model,
+)
+
+log = logging.getLogger(__name__)
+
+CATALOG_FILE = os.path.join(os.path.dirname(__file__), "catalog.json")
+MODELS_PER_PAGE = 10
+REGIONS_PER_PAGE = 12
+
+ADMIN_ID = 2115245228
+WEBAPP_URL = os.environ.get("WEBAPP_URL", "").rstrip("/")
+
+# Conversation states
+MANUFACTURER, MODEL, FUEL_TYPE, REGION, PRICE, YEAR, MILEAGE = range(7)
+
+PRICE_OPTIONS = [
+    ("No limit", None),
+    ("Up to 1,000만 KRW", (0, 1000)),
+    ("Up to 2,000만 KRW", (0, 2000)),
+    ("Up to 3,000만 KRW", (0, 3000)),
+    ("Up to 5,000만 KRW", (0, 5000)),
+    ("1,000–3,000만 KRW", (1000, 3000)),
+    ("2,000–5,000만 KRW", (2000, 5000)),
+    ("5,000만+ KRW", (5000, 99999)),
+]
+
+YEAR_OPTIONS = [
+    ("No limit", None),
+    ("2020+", (202001, 209912)),
+    ("2022+", (202201, 209912)),
+    ("2023+", (202301, 209912)),
+    ("2018–2022", (201801, 202212)),
+    ("2015–2020", (201501, 202012)),
+]
+
+MILEAGE_OPTIONS = [
+    ("No limit", None),
+    ("Up to 30,000 km", (0, 30000)),
+    ("Up to 50,000 km", (0, 50000)),
+    ("Up to 100,000 km", (0, 100000)),
+    ("Up to 150,000 km", (0, 150000)),
+]
+
+MANUFACTURERS_FALLBACK = [
+    "기아", "현대", "제네시스",
+    "BMW", "아우디", "메르세데스-벤츠", "볼보",
+    "토요타", "렉서스", "혼다",
+]
+
+
+# ── Catalog helpers ────────────────────────────────────────────────────────────
+
+def load_catalog() -> dict:
+    if not os.path.exists(CATALOG_FILE):
+        return {}
+    with open(CATALOG_FILE, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def _mfr_data(catalog: dict) -> dict:
+    if "manufacturers" in catalog:
+        return catalog["manufacturers"]
+    return {k: v for k, v in catalog.items() if not k.startswith("_")}
+
+
+def get_manufacturers(catalog: dict) -> list[str]:
+    return sorted(_mfr_data(catalog).keys()) if catalog else MANUFACTURERS_FALLBACK
+
+
+def get_car_type(manufacturer: str, catalog: dict) -> str:
+    entry = _mfr_data(catalog).get(manufacturer, {})
+    return entry.get("car_type", "Y") if isinstance(entry, dict) else "Y"
+
+
+def get_models(manufacturer: str, catalog: dict) -> list[str]:
+    entry = _mfr_data(catalog).get(manufacturer, {})
+    if isinstance(entry, dict):
+        return entry.get("models", [])
+    if isinstance(entry, list):
+        return entry
+    return []
+
+
+def get_fuel_types(manufacturer: str, catalog: dict) -> list[str]:
+    entry = _mfr_data(catalog).get(manufacturer, {})
+    if isinstance(entry, dict):
+        local = entry.get("fuel_types", [])
+        if local:
+            return local
+    gf = catalog.get("_global_filters", {})
+    return gf.get("FuelType", {}).get("values", [])
+
+
+def get_regions(catalog: dict) -> list[str]:
+    gf = catalog.get("_global_filters", {})
+    regions = set(gf.get("OfficeCityState", {}).get("values", []))
+    regions.update(gf.get("OfficeCityState_extra", {}).get("values", []))
+    return sorted(regions)
+
+
+# ── Filter helpers ─────────────────────────────────────────────────────────────
+
+def build_filter(
+    manufacturer: str,
+    car_type: str = "Y",
+    model=None,
+    badge=None,
+    fuel_type=None,
+    region=None,
+    price=None,
+    mileage=None,
+) -> str:
+    """Build the Encar API query string.
+
+    Year is intentionally excluded — the API returns 404 for any Year filter
+    in the q= parameter. Year filtering is applied client-side after fetching.
+    """
+    extra = []
+    if model:
+        extra.append(f"Model.{model}.")
+    if badge:
+        extra.append(f"Badge.{badge}.")
+    if fuel_type:
+        extra.append(f"FuelType.{fuel_type}.")
+    if region:
+        extra.append(f"OfficeCityState.{region}.")
+    if price:
+        extra.append(f"Price.{price[0]}|{price[1]}.")
+    if mileage:
+        extra.append(f"Mileage.{mileage[0]}|{mileage[1]}.")
+    extra_str = "".join(f"_.{c}" for c in extra)
+    return f"(And.(And.Hidden.N._.(C.CarType.{car_type}._.Manufacturer.{manufacturer}.)){extra_str})"
+
+
+def parse_filter_label(item) -> str:
+    """Return a human-readable English label for a stored filter item.
+
+    A filter item is either a plain query string (legacy) or a dict
+    {"q": "...", "year": [lo, hi]} when a year constraint is set.
+    """
+    if isinstance(item, dict):
+        query = item.get("q", "")
+        year_range = item.get("year")
+    else:
+        query = item
+        year_range = None
+
+    parts = []
+    if m := re.search(r"Manufacturer\.([^.]+)\.", query):
+        kr = m.group(1)
+        parts.append(MANUFACTURER_EN.get(kr, kr))
+    if m := re.search(r"Model\.([^.]+)\.", query):
+        parts.append(translate_model(m.group(1)))
+    if m := re.search(r"Badge\.([^.]+)\.", query):
+        parts.append(m.group(1))
+    if m := re.search(r"FuelType\.([^.]+)\.", query):
+        kr = m.group(1)
+        parts.append(FUEL_TYPE_EN.get(kr, kr))
+    if m := re.search(r"OfficeCityState\.([^.]+)\.", query):
+        kr = m.group(1)
+        parts.append(REGION_EN.get(kr, kr))
+    if m := re.search(r"Price\.(\d+)\|(\d+)\.", query):
+        lo, hi = int(m.group(1)), int(m.group(2))
+        if lo == 0:
+            parts.append(f"up to {hi:,}만 KRW")
+        elif hi >= 99999:
+            parts.append(f"{lo:,}만+ KRW")
+        else:
+            parts.append(f"{lo:,}–{hi:,}만 KRW")
+    if year_range:
+        lo_y, hi_y = str(year_range[0])[:4], str(year_range[1])[:4]
+        if int(hi_y) >= 2090:
+            parts.append(f"{lo_y}+")
+        else:
+            parts.append(f"{lo_y}–{hi_y}")
+    if m := re.search(r"Mileage\.(\d+)\|(\d+)\.", query):
+        hi = int(m.group(2))
+        parts.append(f"up to {hi:,} km")
+    return " | ".join(parts) if parts else query[:60]
+
+
+def _user_display(user_id: int) -> str:
+    info = load_user_info(user_id)
+    name = info.get("first_name", str(user_id))
+    uname = info.get("username")
+    return f"{name} (@{uname})" if uname else f"{name} [{user_id}]"
+
+
+# ── Browse helpers ─────────────────────────────────────────────────────────────
+
+BROWSE_PAGE = 20
+
+
+def _car_line(car: dict, idx: int) -> str:
+    year_raw = str(int(car.get("Year") or 0))
+    year = year_raw[:4] if len(year_raw) >= 4 else year_raw
+    mileage = int(car.get("Mileage") or 0)
+    price = int(car.get("Price") or 0)
+    region = REGION_EN.get(car.get("OfficeCityState", ""), car.get("OfficeCityState", ""))
+    mfr = MANUFACTURER_EN.get(car.get("Manufacturer", ""), car.get("Manufacturer", ""))
+    model = translate_model(car.get("Model", ""))
+    url = get_listing_url(car)
+    return f"{idx}. {mfr} {model} · {year} · {mileage:,} km · {price:,}만원 · {region}\n   {url}"
+
+
+async def _send_browse_page(
+    context: ContextTypes.DEFAULT_TYPE,
+    user_id: int,
+    filter_item,
+    offset: int,
+) -> None:
+    if isinstance(filter_item, dict):
+        q = filter_item["q"]
+        year_range = filter_item.get("year")
+    else:
+        q = filter_item
+        year_range = None
+
+    try:
+        total, cars = await asyncio.to_thread(fetch_page, q, offset, BROWSE_PAGE)
+    except Exception as e:
+        await context.bot.send_message(chat_id=user_id, text=f"⚠ Could not fetch listings: {e}")
+        return
+
+    if year_range:
+        lo, hi = year_range
+        cars = [c for c in cars if lo <= (c.get("Year") or 0) <= hi]
+
+    if not cars:
+        msg = "No listings match this filter." if offset == 0 else "✅ No more listings."
+        await context.bot.send_message(chat_id=user_id, text=msg)
+        return
+
+    header = f"📋 *{total:,} listings* · showing {offset + 1}–{offset + len(cars)}"
+    if year_range:
+        header += " _(year filtered client-side)_"
+    lines = [header, ""]
+    for i, car in enumerate(cars, offset + 1):
+        lines.append(_car_line(car, i))
+
+    # Split if too long (Telegram limit 4096)
+    text = "\n".join(lines)
+    if len(text) > 4000:
+        text = text[:4000] + "\n…"
+
+    next_offset = offset + len(cars)
+    has_more = next_offset < total
+    kb_rows = []
+    if has_more:
+        remaining = total - next_offset
+        context.bot_data[f"browse_{user_id}"] = filter_item
+        kb_rows.append([InlineKeyboardButton(
+            f"Next {BROWSE_PAGE} → ({remaining:,} more)",
+            callback_data=f"brw_next:{next_offset}",
+        )])
+    kb_rows.append([InlineKeyboardButton("✓ Done", callback_data="brw_stop")])
+
+    await context.bot.send_message(
+        chat_id=user_id,
+        text=text,
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(kb_rows),
+        disable_web_page_preview=True,
+    )
+
+
+# ── Keyboards ──────────────────────────────────────────────────────────────────
+
+def manufacturers_kb(catalog: dict) -> InlineKeyboardMarkup:
+    items = get_manufacturers(catalog)
+    rows, row = [], []
+    for mfr in items:
+        label = MANUFACTURER_EN.get(mfr, mfr)
+        row.append(InlineKeyboardButton(label, callback_data=f"mfr:{mfr}"))
+        if len(row) == 3:
+            rows.append(row)
+            row = []
+    if row:
+        rows.append(row)
+    return InlineKeyboardMarkup(rows)
+
+
+def paged_kb(
+    items: list[str],
+    prefix: str,
+    per_page: int,
+    page: int,
+    skip_label: str,
+    labels: list[str] | None = None,
+) -> InlineKeyboardMarkup:
+    start = page * per_page
+    page_items = items[start: start + per_page]
+    page_labels = labels[start: start + per_page] if labels else page_items
+    total_pages = (len(items) + per_page - 1) // per_page
+
+    rows, row = [], []
+    for i, (_, label) in enumerate(zip(page_items, page_labels)):
+        idx = start + i
+        row.append(InlineKeyboardButton(label, callback_data=f"{prefix}:{idx}"))
+        if len(row) == 2:
+            rows.append(row)
+            row = []
+    if row:
+        rows.append(row)
+
+    nav = []
+    if page > 0:
+        nav.append(InlineKeyboardButton("← Prev", callback_data=f"{prefix}_pg:{page - 1}"))
+    if page < total_pages - 1:
+        nav.append(InlineKeyboardButton("Next →", callback_data=f"{prefix}_pg:{page + 1}"))
+    if nav:
+        rows.append(nav)
+
+    rows.append([InlineKeyboardButton(f"— {skip_label} —", callback_data=f"{prefix}_skip")])
+    return InlineKeyboardMarkup(rows)
+
+
+def options_kb(options: list[tuple], prefix: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(label, callback_data=f"{prefix}:{i}")]
+        for i, (label, _) in enumerate(options)
+    ])
+
+
+def filters_delete_kb(filters: list[str]) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(f"🗑 {parse_filter_label(f)}", callback_data=f"del:{i}")]
+        for i, f in enumerate(filters)
+    ]
+    rows.append([InlineKeyboardButton("Cancel", callback_data="del_cancel")])
+    return InlineKeyboardMarkup(rows)
+
+
+# ── Admin keyboards ────────────────────────────────────────────────────────────
+
+def admin_user_list_kb(bot_data: dict) -> InlineKeyboardMarkup:
+    """Keyboard listing all users that have at least one filter."""
+    users = list_all_users()
+    rows = []
+    for uid in sorted(users):
+        filters = load_filters(uid)
+        if not filters:
+            continue
+        paused = bot_data.get(f"paused_{uid}", False)
+        icon = "⏸" if paused else "▶️"
+        label = f"{icon} {_user_display(uid)} — {len(filters)} filter(s)"
+        rows.append([InlineKeyboardButton(label, callback_data=f"adm_user:{uid}")])
+    if not rows:
+        rows.append([InlineKeyboardButton("(no active users)", callback_data="adm_noop")])
+    return InlineKeyboardMarkup(rows)
+
+
+def admin_user_detail_kb(user_id: int, bot_data: dict) -> InlineKeyboardMarkup:
+    filters = load_filters(user_id)
+    paused = bot_data.get(f"paused_{user_id}", False)
+    rows = [
+        [InlineKeyboardButton(
+            f"🗑 {i + 1}. {parse_filter_label(f)}",
+            callback_data=f"adm_del:{user_id}:{i}",
+        )]
+        for i, f in enumerate(filters)
+    ]
+    toggle_label = "▶️ Resume" if paused else "⏸ Pause"
+    rows.append([
+        InlineKeyboardButton("🗑 Delete ALL filters", callback_data=f"adm_delall:{user_id}"),
+        InlineKeyboardButton(toggle_label, callback_data=f"adm_toggle:{user_id}"),
+    ])
+    rows.append([InlineKeyboardButton("← Back", callback_data="adm_back")])
+    return InlineKeyboardMarkup(rows)
+
+
+# ── Command handlers ───────────────────────────────────────────────────────────
+
+async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user = update.effective_user
+    save_user_info(user.id, user.first_name, user.username)
+    await update.message.reply_text(
+        f"👋 Welcome, {user.first_name}!\n\n"
+        "🚗 *Encar Scraper Bot*\n\n"
+        "I watch encar.com for new listings and notify you instantly.\n\n"
+        "/add — create a filter\n"
+        "/filters — view your active filters\n"
+        "/delete — remove a filter\n"
+        "/status — your scraper status\n"
+        "/pause — pause your notifications\n"
+        "/resume — resume notifications\n"
+        "/help — show this message",
+        parse_mode="Markdown",
+    )
+
+
+async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.message.reply_text(
+        "🚗 *Encar Scraper Bot*\n\n"
+        "/add — add a filter\n"
+        "/filters — list active filters\n"
+        "/delete — remove a filter\n"
+        "/status — scraper status\n"
+        "/pause — pause scraping\n"
+        "/resume — resume scraping\n"
+        "/cancel — cancel current action",
+        parse_mode="Markdown",
+    )
+
+
+async def cmd_filters(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_id = update.effective_user.id
+    filters = load_filters(user_id)
+    if not filters:
+        await update.message.reply_text("No active filters. Add one with /add")
+        return
+    lines = [f"`{i + 1}.` {parse_filter_label(f)}" for i, f in enumerate(filters)]
+    await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+
+
+async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_id = update.effective_user.id
+    seen = context.bot_data.get(f"seen_{user_id}", load_seen_ids(user_id))
+    filters = load_filters(user_id)
+    last = context.bot_data.get(f"last_check_{user_id}", "not started yet")
+    paused = context.bot_data.get(f"paused_{user_id}", False)
+    state = "⏸ Paused" if paused else "✅ Running"
+    await update.message.reply_text(
+        f"{state}\n"
+        f"Filters: {len(filters)}\n"
+        f"Known cars: {len(seen)}\n"
+        f"Last check: {last}"
+    )
+
+
+async def cmd_link(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
+    """Send the user a personal link to the standalone filter builder page."""
+    if not WEBAPP_URL:
+        await update.message.reply_text("⚠ WEBAPP_URL is not set. Start the server with a tunnel URL.")
+        return
+    user = update.effective_user
+    save_user_info(user.id, user.first_name, user.username)
+    token = hmac.new(
+        os.environ.get("TELEGRAM_BOT_TOKEN", "").encode(),
+        str(user.id).encode(),
+        hashlib.sha256,
+    ).hexdigest()[:24]
+    url = f"{WEBAPP_URL}/add?uid={user.id}&tok={token}"
+    await update.message.reply_text(
+        f"🔗 Your personal filter builder:\n{url}\n\n"
+        "Open it in any browser, build your filter, and click Add Filter.",
+        disable_web_page_preview=True,
+    )
+
+
+async def cmd_pause(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_id = update.effective_user.id
+    context.bot_data[f"paused_{user_id}"] = True
+    await update.message.reply_text("⏸ Scraping paused. Use /resume to continue.")
+
+
+async def cmd_resume(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_id = update.effective_user.id
+    context.bot_data[f"paused_{user_id}"] = False
+    await update.message.reply_text("▶️ Scraping resumed.")
+
+
+async def cmd_delete(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_id = update.effective_user.id
+    filters = load_filters(user_id)
+    if not filters:
+        await update.message.reply_text("No filters to delete.")
+        return
+    await update.message.reply_text(
+        "Choose a filter to delete:",
+        reply_markup=filters_delete_kb(filters),
+    )
+
+
+async def on_delete(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    if query.data == "del_cancel":
+        await query.edit_message_text("Cancelled.")
+        return
+    idx = int(query.data.split(":")[1])
+    filters = load_filters(user_id)
+    if idx >= len(filters):
+        await query.edit_message_text("Filter not found.")
+        return
+    label = parse_filter_label(filters.pop(idx))
+    save_filters(user_id, filters)
+    await query.edit_message_text(f"✅ Deleted: {label}")
+
+
+# ── Admin handlers ─────────────────────────────────────────────────────────────
+
+def _is_admin(update: Update) -> bool:
+    return update.effective_user.id == ADMIN_ID
+
+
+async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not _is_admin(update):
+        await update.message.reply_text("⛔ Admin only.")
+        return
+    users = [u for u in list_all_users() if load_filters(u)]
+    await update.message.reply_text(
+        f"👑 *Admin Panel*\n{len(users)} user(s) with active filters:",
+        parse_mode="Markdown",
+        reply_markup=admin_user_list_kb(context.bot_data),
+    )
+
+
+async def on_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+
+    if not _is_admin(update):
+        await query.edit_message_text("⛔ Admin only.")
+        return
+
+    data = query.data
+
+    if data == "adm_back":
+        users = [u for u in list_all_users() if load_filters(u)]
+        await query.edit_message_text(
+            f"👑 *Admin Panel*\n{len(users)} user(s) with active filters:",
+            parse_mode="Markdown",
+            reply_markup=admin_user_list_kb(context.bot_data),
+        )
+
+    elif data == "adm_noop":
+        pass
+
+    elif data.startswith("adm_user:"):
+        uid = int(data.split(":")[1])
+        filters = load_filters(uid)
+        paused = context.bot_data.get(f"paused_{uid}", False)
+        last = context.bot_data.get(f"last_check_{uid}", "—")
+        state = "⏸ Paused" if paused else "▶️ Running"
+        await query.edit_message_text(
+            f"👤 *{_user_display(uid)}*\n"
+            f"Status: {state}\n"
+            f"Filters: {len(filters)}\n"
+            f"Last check: {last}\n\n"
+            "Tap a filter to delete it:",
+            parse_mode="Markdown",
+            reply_markup=admin_user_detail_kb(uid, context.bot_data),
+        )
+
+    elif data.startswith("adm_del:"):
+        _, uid_s, idx_s = data.split(":")
+        uid, idx = int(uid_s), int(idx_s)
+        filters = load_filters(uid)
+        if idx < len(filters):
+            label = parse_filter_label(filters.pop(idx))
+            save_filters(uid, filters)
+            msg = f"✅ Deleted filter: {label}"
+        else:
+            msg = "⚠ Filter not found."
+        if load_filters(uid):
+            await query.edit_message_text(
+                msg,
+                reply_markup=admin_user_detail_kb(uid, context.bot_data),
+            )
+        else:
+            users = [u for u in list_all_users() if load_filters(u)]
+            await query.edit_message_text(
+                f"{msg}\n\n👑 *Admin Panel*\n{len(users)} user(s) with active filters:",
+                parse_mode="Markdown",
+                reply_markup=admin_user_list_kb(context.bot_data),
+            )
+
+    elif data.startswith("adm_delall:"):
+        uid = int(data.split(":")[1])
+        save_filters(uid, [])
+        users = [u for u in list_all_users() if load_filters(u)]
+        await query.edit_message_text(
+            f"✅ All filters deleted for {_user_display(uid)}\n\n"
+            f"👑 *Admin Panel*\n{len(users)} user(s) with active filters:",
+            parse_mode="Markdown",
+            reply_markup=admin_user_list_kb(context.bot_data),
+        )
+
+    elif data.startswith("adm_toggle:"):
+        uid = int(data.split(":")[1])
+        current = context.bot_data.get(f"paused_{uid}", False)
+        context.bot_data[f"paused_{uid}"] = not current
+        action = "resumed" if current else "paused"
+        filters = load_filters(uid)
+        paused = not current
+        last = context.bot_data.get(f"last_check_{uid}", "—")
+        state = "⏸ Paused" if paused else "▶️ Running"
+        await query.edit_message_text(
+            f"✅ Scraping {action} for {_user_display(uid)}\n\n"
+            f"👤 *{_user_display(uid)}*\n"
+            f"Status: {state}\n"
+            f"Filters: {len(filters)}\n"
+            f"Last check: {last}\n\n"
+            "Tap a filter to delete it:",
+            parse_mode="Markdown",
+            reply_markup=admin_user_detail_kb(uid, context.bot_data),
+        )
+
+
+# ── Add filter conversation ────────────────────────────────────────────────────
+
+def _summary(f: dict) -> str:
+    mfr = f["manufacturer"]
+    parts = [MANUFACTURER_EN.get(mfr, mfr)]
+    if f.get("model"):
+        parts.append(translate_model(f["model"]))
+    if f.get("fuel_type"):
+        parts.append(FUEL_TYPE_EN.get(f["fuel_type"], f["fuel_type"]))
+    if f.get("region"):
+        parts.append(REGION_EN.get(f["region"], f["region"]))
+    return " | ".join(parts)
+
+
+async def cmd_add(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    user = update.effective_user
+    save_user_info(user.id, user.first_name, user.username)
+
+    if WEBAPP_URL:
+        kb = ReplyKeyboardMarkup(
+            [[KeyboardButton("🔍 Open Filter Builder", web_app=WebAppInfo(url=WEBAPP_URL))]],
+            resize_keyboard=True,
+            one_time_keyboard=True,
+        )
+        await update.message.reply_text(
+            "Open the visual filter builder or use the inline menu below:",
+            reply_markup=kb,
+        )
+
+    catalog = load_catalog()
+    context.user_data["catalog"] = catalog
+    context.user_data["filter"] = {}
+    await update.message.reply_text(
+        "Choose a manufacturer:",
+        reply_markup=manufacturers_kb(catalog),
+    )
+    return MANUFACTURER
+
+
+async def on_manufacturer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    mfr = query.data.split(":", 1)[1]
+    mfr_en = MANUFACTURER_EN.get(mfr, mfr)
+    catalog = context.user_data.get("catalog", {})
+    context.user_data["filter"]["manufacturer"] = mfr
+    context.user_data["filter"]["car_type"] = get_car_type(mfr, catalog)
+    models = get_models(mfr, catalog)
+
+    if models:
+        model_labels = [translate_model(m) for m in models]
+        context.user_data["models"] = models
+        context.user_data["model_labels"] = model_labels
+        await query.edit_message_text(
+            f"*{mfr_en}* — choose a model:",
+            parse_mode="Markdown",
+            reply_markup=paged_kb(models, "mdl", MODELS_PER_PAGE, 0, "All models", labels=model_labels),
+        )
+        return MODEL
+    else:
+        fuel_types = get_fuel_types(mfr, catalog)
+        if fuel_types:
+            fuel_labels = [FUEL_TYPE_EN.get(f, f) for f in fuel_types]
+            context.user_data["fuel_types"] = fuel_types
+            context.user_data["fuel_labels"] = fuel_labels
+            await query.edit_message_text(
+                f"*{mfr_en}* — choose fuel type:",
+                parse_mode="Markdown",
+                reply_markup=paged_kb(fuel_types, "fuel", len(fuel_types), 0, "Any fuel type", labels=fuel_labels),
+            )
+            return FUEL_TYPE
+        return await _ask_region(query, context)
+
+
+async def on_model(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    idx = int(query.data.split(":")[1])
+    models = context.user_data.get("models", [])
+    context.user_data["filter"]["model"] = models[idx] if idx < len(models) else None
+    mfr = context.user_data["filter"]["manufacturer"]
+    catalog = context.user_data.get("catalog", {})
+    fuel_types = get_fuel_types(mfr, catalog)
+    if fuel_types:
+        fuel_labels = [FUEL_TYPE_EN.get(f, f) for f in fuel_types]
+        context.user_data["fuel_types"] = fuel_types
+        context.user_data["fuel_labels"] = fuel_labels
+        await query.edit_message_text(
+            f"*{_summary(context.user_data['filter'])}* — fuel type:",
+            parse_mode="Markdown",
+            reply_markup=paged_kb(fuel_types, "fuel", len(fuel_types), 0, "Any fuel type", labels=fuel_labels),
+        )
+        return FUEL_TYPE
+    return await _ask_region(query, context)
+
+
+async def on_model_page(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    page = int(query.data.split(":")[1])
+    models = context.user_data.get("models", [])
+    model_labels = context.user_data.get("model_labels", models)
+    await query.edit_message_text(
+        "Choose a model:",
+        reply_markup=paged_kb(models, "mdl", MODELS_PER_PAGE, page, "All models", labels=model_labels),
+    )
+    return MODEL
+
+
+async def on_model_skip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    context.user_data["filter"]["model"] = None
+    mfr = context.user_data["filter"]["manufacturer"]
+    mfr_en = MANUFACTURER_EN.get(mfr, mfr)
+    catalog = context.user_data.get("catalog", {})
+    fuel_types = get_fuel_types(mfr, catalog)
+    if fuel_types:
+        fuel_labels = [FUEL_TYPE_EN.get(f, f) for f in fuel_types]
+        context.user_data["fuel_types"] = fuel_types
+        context.user_data["fuel_labels"] = fuel_labels
+        await query.edit_message_text(
+            f"*{mfr_en}* — fuel type:",
+            parse_mode="Markdown",
+            reply_markup=paged_kb(fuel_types, "fuel", len(fuel_types), 0, "Any fuel type", labels=fuel_labels),
+        )
+        return FUEL_TYPE
+    return await _ask_region(query, context)
+
+
+async def on_fuel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    idx = int(query.data.split(":")[1])
+    fuel_types = context.user_data.get("fuel_types", [])
+    context.user_data["filter"]["fuel_type"] = fuel_types[idx] if idx < len(fuel_types) else None
+    return await _ask_region(query, context)
+
+
+async def on_fuel_skip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    context.user_data["filter"]["fuel_type"] = None
+    return await _ask_region(query, context)
+
+
+async def _ask_region(query, context: ContextTypes.DEFAULT_TYPE) -> int:
+    catalog = context.user_data.get("catalog", {})
+    regions = get_regions(catalog)
+    if regions:
+        region_labels = [REGION_EN.get(r, r) for r in regions]
+        context.user_data["regions"] = regions
+        context.user_data["region_labels"] = region_labels
+        await query.edit_message_text(
+            f"*{_summary(context.user_data['filter'])}* — region:",
+            parse_mode="Markdown",
+            reply_markup=paged_kb(regions, "reg", REGIONS_PER_PAGE, 0, "Any region", labels=region_labels),
+        )
+        return REGION
+    return await _ask_price(query, context)
+
+
+async def on_region(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    idx = int(query.data.split(":")[1])
+    regions = context.user_data.get("regions", [])
+    context.user_data["filter"]["region"] = regions[idx] if idx < len(regions) else None
+    return await _ask_price(query, context)
+
+
+async def on_region_page(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    page = int(query.data.split(":")[1])
+    regions = context.user_data.get("regions", [])
+    region_labels = context.user_data.get("region_labels", regions)
+    await query.edit_message_text(
+        "Choose a region:",
+        reply_markup=paged_kb(regions, "reg", REGIONS_PER_PAGE, page, "Any region", labels=region_labels),
+    )
+    return REGION
+
+
+async def on_region_skip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    context.user_data["filter"]["region"] = None
+    return await _ask_price(query, context)
+
+
+async def _ask_price(query, context: ContextTypes.DEFAULT_TYPE) -> int:
+    await query.edit_message_text(
+        f"*{_summary(context.user_data['filter'])}* — price:",
+        parse_mode="Markdown",
+        reply_markup=options_kb(PRICE_OPTIONS, "price"),
+    )
+    return PRICE
+
+
+async def on_price(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    context.user_data["filter"]["price"] = PRICE_OPTIONS[int(query.data.split(":")[1])][1]
+    await query.edit_message_text(
+        "Choose year range:",
+        reply_markup=options_kb(YEAR_OPTIONS, "year"),
+    )
+    return YEAR
+
+
+async def on_year(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    context.user_data["filter"]["year"] = YEAR_OPTIONS[int(query.data.split(":")[1])][1]
+    await query.edit_message_text(
+        "Choose mileage limit:",
+        reply_markup=options_kb(MILEAGE_OPTIONS, "mil"),
+    )
+    return MILEAGE
+
+
+async def on_mileage(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    f = context.user_data["filter"]
+    f["mileage"] = MILEAGE_OPTIONS[int(query.data.split(":")[1])][1]
+
+    # Year is NOT sent to the API (causes 404); stored as metadata for
+    # client-side filtering after the results are fetched.
+    api_query = build_filter(
+        manufacturer=f["manufacturer"],
+        car_type=f.get("car_type", "Y"),
+        model=f.get("model"),
+        badge=f.get("badge"),
+        fuel_type=f.get("fuel_type"),
+        region=f.get("region"),
+        price=f.get("price"),
+        mileage=f.get("mileage"),
+    )
+    year = f.get("year")
+    filter_item = {"q": api_query, "year": list(year)} if year else api_query
+
+    filters = load_filters(user_id)
+    filters.append(filter_item)
+    save_filters(user_id, filters)
+
+    await query.edit_message_text(
+        f"✅ Filter added: *{parse_filter_label(filter_item)}*\n\nFetching available listings…",
+        parse_mode="Markdown",
+    )
+    context.bot_data[f"browse_{user_id}"] = filter_item
+    await _send_browse_page(context, user_id, filter_item, offset=0)
+    return ConversationHandler.END
+
+
+async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    await update.message.reply_text("Cancelled.")
+    return ConversationHandler.END
+
+
+async def on_browse_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+
+    if query.data == "brw_stop":
+        await query.edit_message_reply_markup(reply_markup=None)
+        return
+
+    # brw_next:{offset}
+    offset = int(query.data.split(":")[1])
+    filter_item = context.bot_data.get(f"browse_{user_id}")
+    if not filter_item:
+        await query.edit_message_text("Session expired. Use /filters and re-add your filter.")
+        return
+
+    await query.edit_message_reply_markup(reply_markup=None)
+    await _send_browse_page(context, user_id, filter_item, offset)
+
+
+# ── Web App data handler ───────────────────────────────────────────────────────
+
+async def on_webapp_data(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Receive filter JSON submitted by the Mini App via sendData()."""
+    user = update.effective_user
+    save_user_info(user.id, user.first_name, user.username)
+
+    try:
+        payload = json.loads(update.message.web_app_data.data)
+    except (json.JSONDecodeError, AttributeError):
+        await update.message.reply_text("⚠ Could not parse filter data from the web app.")
+        return
+
+    mfr = payload.get("manufacturer")
+    if not mfr:
+        await update.message.reply_text("⚠ Manufacturer is required.")
+        return
+
+    api_query = build_filter(
+        manufacturer=mfr,
+        car_type=payload.get("car_type", "Y"),
+        model=payload.get("model") or None,
+        badge=payload.get("badge") or None,
+        fuel_type=payload.get("fuel_type") or None,
+        region=payload.get("region") or None,
+        price=tuple(payload["price"]) if payload.get("price") else None,
+        mileage=tuple(payload["mileage"]) if payload.get("mileage") else None,
+    )
+    year = payload.get("year")
+    filter_item = {"q": api_query, "year": list(year)} if year else api_query
+
+    filters_list = load_filters(user.id)
+    filters_list.append(filter_item)
+    save_filters(user.id, filters_list)
+
+    await update.message.reply_text(
+        f"✅ Filter added: *{parse_filter_label(filter_item)}*\n\nFetching available listings…",
+        parse_mode="Markdown",
+    )
+    context.bot_data[f"browse_{user.id}"] = filter_item
+    await _send_browse_page(context, user.id, filter_item, offset=0)
+
+
+# ── Scraper job ────────────────────────────────────────────────────────────────
+
+async def scraper_job(context: ContextTypes.DEFAULT_TYPE) -> None:
+    all_users = list_all_users()
+    if not all_users:
+        return
+
+    now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    total_new = 0
+
+    for user_id in all_users:
+        if context.bot_data.get(f"paused_{user_id}", False):
+            continue
+
+        filters = load_filters(user_id)
+        if not filters:
+            continue
+
+        seen_ids: set[str] = context.bot_data.setdefault(
+            f"seen_{user_id}", load_seen_ids(user_id)
+        )
+        new_ids: set[str] = set()
+
+        # Collect all new cars across all filters, deduped
+        new_cars: list[dict] = []
+        for filter_item in filters:
+            if isinstance(filter_item, dict):
+                filter_query = filter_item["q"]
+                year_range = filter_item.get("year")
+            else:
+                filter_query = filter_item
+                year_range = None
+
+            try:
+                cars = await asyncio.to_thread(fetch_cars, filter_query)
+            except Exception as e:
+                log.error("Fetch error user=%s: %s", user_id, e)
+                continue
+
+            if year_range:
+                lo, hi = year_range
+                cars = [c for c in cars if lo <= (c.get("Year") or 0) <= hi]
+
+            for car in cars:
+                car_id = str(car.get("Id", ""))
+                if car_id and car_id not in seen_ids and car_id not in {str(c.get("Id")) for c in new_cars}:
+                    new_cars.append(car)
+                    new_ids.add(car_id)
+
+        # Send new cars in batches of 20
+        for batch_start in range(0, len(new_cars), 20):
+            batch = new_cars[batch_start: batch_start + 20]
+            lines = [f"🔔 *{len(new_cars)} new listing(s) found*\n"]
+            for i, car in enumerate(batch, batch_start + 1):
+                lines.append(_car_line(car, i))
+            text = "\n".join(lines)
+            if len(text) > 4000:
+                text = text[:4000] + "\n…"
+            try:
+                await context.bot.send_message(
+                    chat_id=user_id, text=text,
+                    parse_mode="Markdown", disable_web_page_preview=True,
+                )
+                log.info("Alert batch sent to user=%s cars=%d", user_id, len(batch))
+            except Exception as e:
+                log.error("Send error user=%s: %s", user_id, e)
+
+        if new_ids:
+            seen_ids |= new_ids
+            save_seen_ids(user_id, seen_ids)
+            total_new += len(new_ids)
+
+        context.bot_data[f"last_check_{user_id}"] = now
+
+    log.info("Scraper cycle done. Users: %d, new listings: %d", len(all_users), total_new)
+
+
+# ── App builder ────────────────────────────────────────────────────────────────
+
+async def post_init(application: Application) -> None:
+    # Pre-load seen IDs for all existing users into bot_data cache
+    for uid in list_all_users():
+        application.bot_data[f"seen_{uid}"] = load_seen_ids(uid)
+    log.info("Loaded seen_ids for %d user(s)", len(list_all_users()))
+
+
+def build_app(token: str) -> Application:
+    app = Application.builder().token(token).post_init(post_init).build()
+
+    conv = ConversationHandler(
+        entry_points=[CommandHandler("add", cmd_add)],
+        states={
+            MANUFACTURER: [CallbackQueryHandler(on_manufacturer, pattern=r"^mfr:")],
+            MODEL: [
+                CallbackQueryHandler(on_model, pattern=r"^mdl:\d+$"),
+                CallbackQueryHandler(on_model_page, pattern=r"^mdl_pg:"),
+                CallbackQueryHandler(on_model_skip, pattern=r"^mdl_skip$"),
+            ],
+            FUEL_TYPE: [
+                CallbackQueryHandler(on_fuel, pattern=r"^fuel:\d+$"),
+                CallbackQueryHandler(on_fuel_skip, pattern=r"^fuel_skip$"),
+            ],
+            REGION: [
+                CallbackQueryHandler(on_region, pattern=r"^reg:\d+$"),
+                CallbackQueryHandler(on_region_page, pattern=r"^reg_pg:"),
+                CallbackQueryHandler(on_region_skip, pattern=r"^reg_skip$"),
+            ],
+            PRICE: [CallbackQueryHandler(on_price, pattern=r"^price:")],
+            YEAR: [CallbackQueryHandler(on_year, pattern=r"^year:")],
+            MILEAGE: [CallbackQueryHandler(on_mileage, pattern=r"^mil:")],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+    )
+
+    app.add_handler(CommandHandler("start", cmd_start))
+    app.add_handler(CommandHandler("link", cmd_link))
+    app.add_handler(CommandHandler("help", cmd_help))
+    app.add_handler(CommandHandler("filters", cmd_filters))
+    app.add_handler(CommandHandler("delete", cmd_delete))
+    app.add_handler(CommandHandler("status", cmd_status))
+    app.add_handler(CommandHandler("pause", cmd_pause))
+    app.add_handler(CommandHandler("resume", cmd_resume))
+    app.add_handler(CommandHandler("admin", cmd_admin))
+    app.add_handler(CallbackQueryHandler(on_delete, pattern=r"^del"))
+    app.add_handler(CallbackQueryHandler(on_admin_callback, pattern=r"^adm_"))
+    app.add_handler(CallbackQueryHandler(on_browse_callback, pattern=r"^brw"))
+    app.add_handler(MessageHandler(tg_filters.StatusUpdate.WEB_APP_DATA, on_webapp_data))
+    app.add_handler(conv)
+
+    app.job_queue.run_repeating(scraper_job, interval=60, first=5)
+
+    return app
