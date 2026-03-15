@@ -239,7 +239,8 @@ def _car_line(car: dict, idx: int) -> str:
 
 
 async def _send_browse_page(
-    context: ContextTypes.DEFAULT_TYPE,
+    bot,
+    bot_data: dict,
     user_id: int,
     filter_item,
     offset: int,
@@ -254,7 +255,7 @@ async def _send_browse_page(
     try:
         total, cars = await asyncio.to_thread(fetch_page, q, offset, BROWSE_PAGE)
     except Exception as e:
-        await context.bot.send_message(chat_id=user_id, text=f"⚠ Не удалось получить объявления: {e}")
+        await bot.send_message(chat_id=user_id, text=f"⚠ Не удалось получить объявления: {e}")
         return
 
     if year_range:
@@ -263,7 +264,7 @@ async def _send_browse_page(
 
     if not cars:
         msg = "Объявлений по этому фильтру не найдено." if offset == 0 else "✅ Больше объявлений нет."
-        await context.bot.send_message(chat_id=user_id, text=msg)
+        await bot.send_message(chat_id=user_id, text=msg)
         return
 
     header = f"📋 *{total:,} объявлений* · показано {offset + 1}–{offset + len(cars)}"
@@ -283,14 +284,14 @@ async def _send_browse_page(
     kb_rows = []
     if has_more:
         remaining = total - next_offset
-        context.bot_data[f"browse_{user_id}"] = filter_item
+        bot_data[f"browse_{user_id}"] = filter_item
         kb_rows.append([InlineKeyboardButton(
             f"Следующие {BROWSE_PAGE} → (ещё {remaining:,})",
             callback_data=f"brw_next:{next_offset}",
         )])
     kb_rows.append([InlineKeyboardButton("✓ Готово", callback_data="brw_stop")])
 
-    await context.bot.send_message(
+    await bot.send_message(
         chat_id=user_id,
         text=text,
         parse_mode="Markdown",
@@ -300,7 +301,8 @@ async def _send_browse_page(
 
 
 async def _seed_and_show(
-    context: ContextTypes.DEFAULT_TYPE,
+    bot,
+    bot_data: dict,
     user_id: int,
     filter_item,
 ) -> None:
@@ -319,7 +321,7 @@ async def _seed_and_show(
         lo, hi = year_range
         seed_cars = [c for c in seed_cars if lo <= (c.get("Year") or 0) <= hi]
 
-    seen_ids: set[str] = context.bot_data.setdefault(
+    seen_ids: set[str] = bot_data.setdefault(
         f"seen_{user_id}", load_seen_ids(user_id)
     )
     for car in seed_cars:
@@ -331,8 +333,8 @@ async def _seed_and_show(
         log.info("Seeded %d IDs for user=%s", len(seed_cars), user_id)
 
     # Store filter for pagination and show first page
-    context.bot_data[f"browse_{user_id}"] = filter_item
-    await _send_browse_page(context, user_id, filter_item, offset=0)
+    bot_data[f"browse_{user_id}"] = filter_item
+    await _send_browse_page(bot, bot_data, user_id, filter_item, offset=0)
 
 
 # ── Keyboards ──────────────────────────────────────────────────────────────────
@@ -936,7 +938,7 @@ async def on_mileage(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         "Буду уведомлять о новых объявлениях.",
         parse_mode="Markdown",
     )
-    await _seed_and_show(context, user_id, filter_item)
+    await _seed_and_show(context.bot, context.bot_data, user_id, filter_item)
     return ConversationHandler.END
 
 
@@ -962,7 +964,7 @@ async def on_browse_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
 
     await query.edit_message_reply_markup(reply_markup=None)
-    await _send_browse_page(context, user_id, filter_item, offset)
+    await _send_browse_page(context.bot, context.bot_data, user_id, filter_item, offset)
 
 
 # ── Web App data handler ───────────────────────────────────────────────────────
@@ -1005,7 +1007,7 @@ async def on_webapp_data(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         "Буду уведомлять о новых объявлениях.",
         parse_mode="Markdown",
     )
-    await _seed_and_show(context, user.id, filter_item)
+    await _seed_and_show(context.bot, context.bot_data, user.id, filter_item)
 
 
 # ── Scraper job ────────────────────────────────────────────────────────────────

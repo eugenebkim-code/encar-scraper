@@ -246,6 +246,9 @@ createApp({
     const countLoading = ref(false);
     let countTimer = null;
 
+    const submitting = ref(false);
+    const submitError = ref("");
+
     // ── Catalog-derived lists ─────────────────────────────────────────────────
     const manufacturers = computed(() => {
       if (!catalog.value) return [];
@@ -332,8 +335,8 @@ createApp({
     // ── Submit ────────────────────────────────────────────────────────────────
     const canSubmit = computed(() => !!manufacturer.value);
 
-    function submit() {
-      if (!canSubmit.value) return;
+    async function submit() {
+      if (!canSubmit.value || submitting.value) return;
       const payload = {
         manufacturer: manufacturer.value,
         car_type: carType.value,
@@ -345,10 +348,29 @@ createApp({
         mileage: mileage.value || null,
         year: year.value || null,
       };
-      if (window.Telegram?.WebApp?.sendData) {
-        window.Telegram.WebApp.sendData(JSON.stringify(payload));
-      } else {
-        alert("Dev mode — payload:\n" + JSON.stringify(payload, null, 2));
+      const tg = window.Telegram?.WebApp;
+      if (!tg?.initData) {
+        alert("Dev mode:\n" + JSON.stringify(payload, null, 2));
+        return;
+      }
+      submitting.value = true;
+      submitError.value = "";
+      try {
+        const res = await fetch("/api/add_filter_tg", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ init_data: tg.initData, filter: payload }),
+        });
+        const data = await res.json();
+        if (data.ok) {
+          tg.close();
+        } else {
+          submitError.value = data.error || "Ошибка сервера";
+        }
+      } catch (e) {
+        submitError.value = "Сетевая ошибка. Попробуйте снова.";
+      } finally {
+        submitting.value = false;
       }
     }
 
@@ -380,7 +402,7 @@ createApp({
       manufacturer, model, badge, fuelType, region, price, year, mileage,
       manufacturers, models, badgeOptions, badgesLoading, fuelTypes, regions,
       PRICE_OPTIONS, YEAR_OPTIONS, MILEAGE_OPTIONS,
-      liveCount, countLoading, canSubmit, submit,
+      liveCount, countLoading, canSubmit, submit, submitting, submitError,
       mfrLabel: k => MFR_EN[k] || k,
       modelLabel: translateModel,
       fuelLabel: k => FUEL_EN[k] || k,
@@ -507,8 +529,9 @@ createApp({
         </div>
 
         <!-- Submit -->
-        <button class="btn-submit" :disabled="!canSubmit" @click="submit">
-          ✅ Добавить фильтр
+        <div v-if="submitError" class="error-msg">{{ submitError }}</div>
+        <button class="btn-submit" :disabled="!canSubmit || submitting" @click="submit">
+          {{ submitting ? "Добавление…" : "✅ Добавить фильтр" }}
         </button>
 
       </template>

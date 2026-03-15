@@ -22,14 +22,14 @@ async def run() -> None:
 
     port = int(os.environ.get("PORT", 8080))
 
+    ptb_app = build_app(token)
+
     # aiohttp runner (handle_signals=False — we manage shutdown)
-    web_app = build_web_app(secret=token)
+    web_app = build_web_app(secret=token, ptb_app=ptb_app)
     runner = web.AppRunner(web_app, handle_signals=False)
     await runner.setup()
     await web.TCPSite(runner, "0.0.0.0", port).start()
     log.info("Webapp server on http://0.0.0.0:%d", port)
-
-    ptb_app = build_app(token)
     async with ptb_app:
         await ptb_app.start()
         await ptb_app.updater.start_polling(
