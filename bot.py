@@ -459,17 +459,15 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         except Exception as e:
             log.warning("Menu button for user %s: %s", user.id, e)
     await update.message.reply_text(
-        f"👋 Добро пожаловать, {user.first_name}!\n\n"
         "🚗 *Encar Scraper Bot*\n\n"
-        "Слежу за новыми объявлениями на encar.com и мгновенно уведомляю вас.\n\n"
+        "Бот постоянно мониторит encar.com и мгновенно уведомляет вас о новых объявлениях. "
+        "Список команд:\n\n"
         "/add — создать фильтр\n"
-        "/link — личная ссылка на конструктор фильтров\n"
         "/filters — активные фильтры\n"
         "/delete — удалить фильтр\n"
         "/status — статус бота\n"
         "/pause — приостановить уведомления\n"
-        "/resume — возобновить уведомления\n"
-        "/help — это сообщение",
+        "/resume — возобновить уведомления",
         parse_mode="Markdown",
     )
 
