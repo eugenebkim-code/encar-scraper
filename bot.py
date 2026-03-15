@@ -885,11 +885,10 @@ async def on_mileage(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     save_filters(user_id, filters)
 
     await query.edit_message_text(
-        f"✅ Фильтр добавлен: *{parse_filter_label(filter_item)}*\n\nЗагружаем доступные объявления…",
+        f"✅ Фильтр добавлен: *{parse_filter_label(filter_item)}*\n\n"
+        "Буду уведомлять о новых объявлениях.",
         parse_mode="Markdown",
     )
-    context.bot_data[f"browse_{user_id}"] = filter_item
-    await _send_browse_page(context, user_id, filter_item, offset=0)
     return ConversationHandler.END
 
 
@@ -954,11 +953,10 @@ async def on_webapp_data(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     save_filters(user.id, filters_list)
 
     await update.message.reply_text(
-        f"✅ Фильтр добавлен: *{parse_filter_label(filter_item)}*\n\nЗагружаем доступные объявления…",
+        f"✅ Фильтр добавлен: *{parse_filter_label(filter_item)}*\n\n"
+        "Буду уведомлять о новых объявлениях.",
         parse_mode="Markdown",
     )
-    context.bot_data[f"browse_{user.id}"] = filter_item
-    await _send_browse_page(context, user.id, filter_item, offset=0)
 
 
 # ── Scraper job ────────────────────────────────────────────────────────────────
