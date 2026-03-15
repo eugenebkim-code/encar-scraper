@@ -12,6 +12,7 @@ import re
 from telegram import (
     InlineKeyboardButton, InlineKeyboardMarkup, Update,
     KeyboardButton, ReplyKeyboardMarkup, WebAppInfo,
+    MenuButtonWebApp,
 )
 from telegram.ext import (
     Application,
@@ -1042,6 +1043,14 @@ async def post_init(application: Application) -> None:
     for uid in list_all_users():
         application.bot_data[f"seen_{uid}"] = load_seen_ids(uid)
     log.info("Loaded seen_ids for %d user(s)", len(list_all_users()))
+    if WEBAPP_URL:
+        await application.bot.set_chat_menu_button(
+            menu_button=MenuButtonWebApp(
+                text="🔍 Фильтры",
+                web_app=WebAppInfo(url=WEBAPP_URL),
+            )
+        )
+        log.info("Menu button set to %s", WEBAPP_URL)
 
 
 def build_app(token: str) -> Application:
