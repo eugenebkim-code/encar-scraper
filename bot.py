@@ -445,6 +445,17 @@ def admin_user_detail_kb(user_id: int, bot_data: dict) -> InlineKeyboardMarkup:
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
     save_user_info(user.id, user.first_name, user.username)
+    if WEBAPP_URL:
+        try:
+            await context.bot.set_chat_menu_button(
+                chat_id=user.id,
+                menu_button=MenuButtonWebApp(
+                    text="🔍 Фильтры",
+                    web_app=WebAppInfo(url=WEBAPP_URL),
+                ),
+            )
+        except Exception as e:
+            log.warning("Menu button for user %s: %s", user.id, e)
     await update.message.reply_text(
         f"👋 Добро пожаловать, {user.first_name}!\n\n"
         "🚗 *Encar Scraper Bot*\n\n"
@@ -1082,17 +1093,26 @@ async def scraper_job(context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def post_init(application: Application) -> None:
     # Pre-load seen IDs for all existing users into bot_data cache
-    for uid in list_all_users():
+    all_users = list_all_users()
+    for uid in all_users:
         application.bot_data[f"seen_{uid}"] = load_seen_ids(uid)
-    log.info("Loaded seen_ids for %d user(s)", len(list_all_users()))
+    log.info("Loaded seen_ids for %d user(s)", len(all_users))
     if WEBAPP_URL:
-        await application.bot.set_chat_menu_button(
-            menu_button=MenuButtonWebApp(
-                text="🔍 Фильтры",
-                web_app=WebAppInfo(url=WEBAPP_URL),
-            )
+        menu_button = MenuButtonWebApp(
+            text="🔍 Фильтры",
+            web_app=WebAppInfo(url=WEBAPP_URL),
         )
-        log.info("Menu button set to %s", WEBAPP_URL)
+        # Set global default
+        await application.bot.set_chat_menu_button(menu_button=menu_button)
+        # Also update every known user's chat explicitly so desktop clients refresh
+        for uid in all_users:
+            try:
+                await application.bot.set_chat_menu_button(
+                    chat_id=uid, menu_button=menu_button
+                )
+            except Exception as e:
+                log.warning("Menu button for user %s: %s", uid, e)
+        log.info("Menu button set for %d user(s) → %s", len(all_users), WEBAPP_URL)
 
 
 def build_app(token: str) -> Application:
