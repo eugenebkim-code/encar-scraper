@@ -414,6 +414,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "🚗 *Encar Scraper Bot*\n\n"
         "Слежу за новыми объявлениями на encar.com и мгновенно уведомляю вас.\n\n"
         "/add — создать фильтр\n"
+        "/link — личная ссылка на конструктор фильтров\n"
         "/filters — активные фильтры\n"
         "/delete — удалить фильтр\n"
         "/status — статус бота\n"
@@ -428,6 +429,7 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
         "🚗 *Encar Scraper Bot*\n\n"
         "/add — добавить фильтр\n"
+        "/link — личная ссылка на конструктор фильтров\n"
         "/filters — список активных фильтров\n"
         "/delete — удалить фильтр\n"
         "/status — статус бота\n"
