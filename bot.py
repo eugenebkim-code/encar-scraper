@@ -48,18 +48,18 @@ WEBAPP_URL = os.environ.get("WEBAPP_URL", "").rstrip("/")
 MANUFACTURER, MODEL, FUEL_TYPE, REGION, PRICE, YEAR, MILEAGE = range(7)
 
 PRICE_OPTIONS = [
-    ("No limit", None),
-    ("Up to 1,000만 KRW", (0, 1000)),
-    ("Up to 2,000만 KRW", (0, 2000)),
-    ("Up to 3,000만 KRW", (0, 3000)),
-    ("Up to 5,000만 KRW", (0, 5000)),
+    ("Без ограничений", None),
+    ("До 1,000만 KRW", (0, 1000)),
+    ("До 2,000만 KRW", (0, 2000)),
+    ("До 3,000만 KRW", (0, 3000)),
+    ("До 5,000만 KRW", (0, 5000)),
     ("1,000–3,000만 KRW", (1000, 3000)),
     ("2,000–5,000만 KRW", (2000, 5000)),
     ("5,000만+ KRW", (5000, 99999)),
 ]
 
 YEAR_OPTIONS = [
-    ("No limit", None),
+    ("Без ограничений", None),
     ("2020+", (202001, 209912)),
     ("2022+", (202201, 209912)),
     ("2023+", (202301, 209912)),
@@ -68,11 +68,11 @@ YEAR_OPTIONS = [
 ]
 
 MILEAGE_OPTIONS = [
-    ("No limit", None),
-    ("Up to 30,000 km", (0, 30000)),
-    ("Up to 50,000 km", (0, 50000)),
-    ("Up to 100,000 km", (0, 100000)),
-    ("Up to 150,000 km", (0, 150000)),
+    ("Без ограничений", None),
+    ("До 30,000 км", (0, 30000)),
+    ("До 50,000 км", (0, 50000)),
+    ("До 100,000 км", (0, 100000)),
+    ("До 150,000 км", (0, 150000)),
 ]
 
 MANUFACTURERS_FALLBACK = [
@@ -196,7 +196,7 @@ def parse_filter_label(item) -> str:
     if m := re.search(r"Price\.(\d+)\|(\d+)\.", query):
         lo, hi = int(m.group(1)), int(m.group(2))
         if lo == 0:
-            parts.append(f"up to {hi:,}만 KRW")
+            parts.append(f"до {hi:,}만 KRW")
         elif hi >= 99999:
             parts.append(f"{lo:,}만+ KRW")
         else:
@@ -209,7 +209,7 @@ def parse_filter_label(item) -> str:
             parts.append(f"{lo_y}–{hi_y}")
     if m := re.search(r"Mileage\.(\d+)\|(\d+)\.", query):
         hi = int(m.group(2))
-        parts.append(f"up to {hi:,} km")
+        parts.append(f"до {hi:,} км")
     return " | ".join(parts) if parts else query[:60]
 
 
@@ -253,7 +253,7 @@ async def _send_browse_page(
     try:
         total, cars = await asyncio.to_thread(fetch_page, q, offset, BROWSE_PAGE)
     except Exception as e:
-        await context.bot.send_message(chat_id=user_id, text=f"⚠ Could not fetch listings: {e}")
+        await context.bot.send_message(chat_id=user_id, text=f"⚠ Не удалось получить объявления: {e}")
         return
 
     if year_range:
@@ -261,13 +261,13 @@ async def _send_browse_page(
         cars = [c for c in cars if lo <= (c.get("Year") or 0) <= hi]
 
     if not cars:
-        msg = "No listings match this filter." if offset == 0 else "✅ No more listings."
+        msg = "Объявлений по этому фильтру не найдено." if offset == 0 else "✅ Больше объявлений нет."
         await context.bot.send_message(chat_id=user_id, text=msg)
         return
 
-    header = f"📋 *{total:,} listings* · showing {offset + 1}–{offset + len(cars)}"
+    header = f"📋 *{total:,} объявлений* · показано {offset + 1}–{offset + len(cars)}"
     if year_range:
-        header += " _(year filtered client-side)_"
+        header += " _(год отфильтрован локально)_"
     lines = [header, ""]
     for i, car in enumerate(cars, offset + 1):
         lines.append(_car_line(car, i))
@@ -284,10 +284,10 @@ async def _send_browse_page(
         remaining = total - next_offset
         context.bot_data[f"browse_{user_id}"] = filter_item
         kb_rows.append([InlineKeyboardButton(
-            f"Next {BROWSE_PAGE} → ({remaining:,} more)",
+            f"Следующие {BROWSE_PAGE} → (ещё {remaining:,})",
             callback_data=f"brw_next:{next_offset}",
         )])
-    kb_rows.append([InlineKeyboardButton("✓ Done", callback_data="brw_stop")])
+    kb_rows.append([InlineKeyboardButton("✓ Готово", callback_data="brw_stop")])
 
     await context.bot.send_message(
         chat_id=user_id,
@@ -339,9 +339,9 @@ def paged_kb(
 
     nav = []
     if page > 0:
-        nav.append(InlineKeyboardButton("← Prev", callback_data=f"{prefix}_pg:{page - 1}"))
+        nav.append(InlineKeyboardButton("← Назад", callback_data=f"{prefix}_pg:{page - 1}"))
     if page < total_pages - 1:
-        nav.append(InlineKeyboardButton("Next →", callback_data=f"{prefix}_pg:{page + 1}"))
+        nav.append(InlineKeyboardButton("Вперёд →", callback_data=f"{prefix}_pg:{page + 1}"))
     if nav:
         rows.append(nav)
 
@@ -361,7 +361,7 @@ def filters_delete_kb(filters: list[str]) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(f"🗑 {parse_filter_label(f)}", callback_data=f"del:{i}")]
         for i, f in enumerate(filters)
     ]
-    rows.append([InlineKeyboardButton("Cancel", callback_data="del_cancel")])
+    rows.append([InlineKeyboardButton("Отмена", callback_data="del_cancel")])
     return InlineKeyboardMarkup(rows)
 
 
@@ -377,10 +377,10 @@ def admin_user_list_kb(bot_data: dict) -> InlineKeyboardMarkup:
             continue
         paused = bot_data.get(f"paused_{uid}", False)
         icon = "⏸" if paused else "▶️"
-        label = f"{icon} {_user_display(uid)} — {len(filters)} filter(s)"
+        label = f"{icon} {_user_display(uid)} — {len(filters)} фильтр(ов)"
         rows.append([InlineKeyboardButton(label, callback_data=f"adm_user:{uid}")])
     if not rows:
-        rows.append([InlineKeyboardButton("(no active users)", callback_data="adm_noop")])
+        rows.append([InlineKeyboardButton("(нет активных пользователей)", callback_data="adm_noop")])
     return InlineKeyboardMarkup(rows)
 
 
@@ -394,12 +394,12 @@ def admin_user_detail_kb(user_id: int, bot_data: dict) -> InlineKeyboardMarkup:
         )]
         for i, f in enumerate(filters)
     ]
-    toggle_label = "▶️ Resume" if paused else "⏸ Pause"
+    toggle_label = "▶️ Возобновить" if paused else "⏸ Пауза"
     rows.append([
-        InlineKeyboardButton("🗑 Delete ALL filters", callback_data=f"adm_delall:{user_id}"),
+        InlineKeyboardButton("🗑 Удалить ВСЕ фильтры", callback_data=f"adm_delall:{user_id}"),
         InlineKeyboardButton(toggle_label, callback_data=f"adm_toggle:{user_id}"),
     ])
-    rows.append([InlineKeyboardButton("← Back", callback_data="adm_back")])
+    rows.append([InlineKeyboardButton("← Назад", callback_data="adm_back")])
     return InlineKeyboardMarkup(rows)
 
 
@@ -409,16 +409,16 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
     save_user_info(user.id, user.first_name, user.username)
     await update.message.reply_text(
-        f"👋 Welcome, {user.first_name}!\n\n"
+        f"👋 Добро пожаловать, {user.first_name}!\n\n"
         "🚗 *Encar Scraper Bot*\n\n"
-        "I watch encar.com for new listings and notify you instantly.\n\n"
-        "/add — create a filter\n"
-        "/filters — view your active filters\n"
-        "/delete — remove a filter\n"
-        "/status — your scraper status\n"
-        "/pause — pause your notifications\n"
-        "/resume — resume notifications\n"
-        "/help — show this message",
+        "Слежу за новыми объявлениями на encar.com и мгновенно уведомляю вас.\n\n"
+        "/add — создать фильтр\n"
+        "/filters — активные фильтры\n"
+        "/delete — удалить фильтр\n"
+        "/status — статус бота\n"
+        "/pause — приостановить уведомления\n"
+        "/resume — возобновить уведомления\n"
+        "/help — это сообщение",
         parse_mode="Markdown",
     )
 
@@ -426,13 +426,13 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
         "🚗 *Encar Scraper Bot*\n\n"
-        "/add — add a filter\n"
-        "/filters — list active filters\n"
-        "/delete — remove a filter\n"
-        "/status — scraper status\n"
-        "/pause — pause scraping\n"
-        "/resume — resume scraping\n"
-        "/cancel — cancel current action",
+        "/add — добавить фильтр\n"
+        "/filters — список активных фильтров\n"
+        "/delete — удалить фильтр\n"
+        "/status — статус бота\n"
+        "/pause — приостановить\n"
+        "/resume — возобновить\n"
+        "/cancel — отменить текущее действие",
         parse_mode="Markdown",
     )
 
@@ -441,7 +441,7 @@ async def cmd_filters(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     user_id = update.effective_user.id
     filters = load_filters(user_id)
     if not filters:
-        await update.message.reply_text("No active filters. Add one with /add")
+        await update.message.reply_text("Нет активных фильтров. Добавьте через /add")
         return
     lines = [f"`{i + 1}.` {parse_filter_label(f)}" for i, f in enumerate(filters)]
     await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
@@ -451,21 +451,21 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     user_id = update.effective_user.id
     seen = context.bot_data.get(f"seen_{user_id}", load_seen_ids(user_id))
     filters = load_filters(user_id)
-    last = context.bot_data.get(f"last_check_{user_id}", "not started yet")
+    last = context.bot_data.get(f"last_check_{user_id}", "ещё не запускался")
     paused = context.bot_data.get(f"paused_{user_id}", False)
-    state = "⏸ Paused" if paused else "✅ Running"
+    state = "⏸ На паузе" if paused else "✅ Активен"
     await update.message.reply_text(
         f"{state}\n"
-        f"Filters: {len(filters)}\n"
-        f"Known cars: {len(seen)}\n"
-        f"Last check: {last}"
+        f"Фильтры: {len(filters)}\n"
+        f"Известных авто: {len(seen)}\n"
+        f"Последняя проверка: {last}"
     )
 
 
 async def cmd_link(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
     """Send the user a personal link to the standalone filter builder page."""
     if not WEBAPP_URL:
-        await update.message.reply_text("⚠ WEBAPP_URL is not set. Start the server with a tunnel URL.")
+        await update.message.reply_text("⚠ WEBAPP_URL не задан. Запустите сервер с URL туннеля.")
         return
     user = update.effective_user
     save_user_info(user.id, user.first_name, user.username)
@@ -476,8 +476,8 @@ async def cmd_link(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
     ).hexdigest()[:24]
     url = f"{WEBAPP_URL}/add?uid={user.id}&tok={token}"
     await update.message.reply_text(
-        f"🔗 Your personal filter builder:\n{url}\n\n"
-        "Open it in any browser, build your filter, and click Add Filter.",
+        f"🔗 Ваша личная ссылка на конструктор фильтров:\n{url}\n\n"
+        "Откройте в любом браузере, настройте фильтр и нажмите «Добавить фильтр».",
         disable_web_page_preview=True,
     )
 
@@ -485,23 +485,23 @@ async def cmd_link(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
 async def cmd_pause(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
     context.bot_data[f"paused_{user_id}"] = True
-    await update.message.reply_text("⏸ Scraping paused. Use /resume to continue.")
+    await update.message.reply_text("⏸ Поиск приостановлен. Используйте /resume для продолжения.")
 
 
 async def cmd_resume(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
     context.bot_data[f"paused_{user_id}"] = False
-    await update.message.reply_text("▶️ Scraping resumed.")
+    await update.message.reply_text("▶️ Поиск возобновлён.")
 
 
 async def cmd_delete(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
     filters = load_filters(user_id)
     if not filters:
-        await update.message.reply_text("No filters to delete.")
+        await update.message.reply_text("Нет фильтров для удаления.")
         return
     await update.message.reply_text(
-        "Choose a filter to delete:",
+        "Выберите фильтр для удаления:",
         reply_markup=filters_delete_kb(filters),
     )
 
@@ -511,16 +511,16 @@ async def on_delete(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await query.answer()
     user_id = query.from_user.id
     if query.data == "del_cancel":
-        await query.edit_message_text("Cancelled.")
+        await query.edit_message_text("Отменено.")
         return
     idx = int(query.data.split(":")[1])
     filters = load_filters(user_id)
     if idx >= len(filters):
-        await query.edit_message_text("Filter not found.")
+        await query.edit_message_text("Фильтр не найден.")
         return
     label = parse_filter_label(filters.pop(idx))
     save_filters(user_id, filters)
-    await query.edit_message_text(f"✅ Deleted: {label}")
+    await query.edit_message_text(f"✅ Удалён: {label}")
 
 
 # ── Admin handlers ─────────────────────────────────────────────────────────────
@@ -531,11 +531,11 @@ def _is_admin(update: Update) -> bool:
 
 async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not _is_admin(update):
-        await update.message.reply_text("⛔ Admin only.")
+        await update.message.reply_text("⛔ Только для администратора.")
         return
     users = [u for u in list_all_users() if load_filters(u)]
     await update.message.reply_text(
-        f"👑 *Admin Panel*\n{len(users)} user(s) with active filters:",
+        f"👑 *Панель администратора*\n{len(users)} польз. с активными фильтрами:",
         parse_mode="Markdown",
         reply_markup=admin_user_list_kb(context.bot_data),
     )
@@ -546,7 +546,7 @@ async def on_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     await query.answer()
 
     if not _is_admin(update):
-        await query.edit_message_text("⛔ Admin only.")
+        await query.edit_message_text("⛔ Только для администратора.")
         return
 
     data = query.data
@@ -554,7 +554,7 @@ async def on_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     if data == "adm_back":
         users = [u for u in list_all_users() if load_filters(u)]
         await query.edit_message_text(
-            f"👑 *Admin Panel*\n{len(users)} user(s) with active filters:",
+            f"👑 *Панель администратора*\n{len(users)} польз. с активными фильтрами:",
             parse_mode="Markdown",
             reply_markup=admin_user_list_kb(context.bot_data),
         )
@@ -567,13 +567,13 @@ async def on_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         filters = load_filters(uid)
         paused = context.bot_data.get(f"paused_{uid}", False)
         last = context.bot_data.get(f"last_check_{uid}", "—")
-        state = "⏸ Paused" if paused else "▶️ Running"
+        state = "⏸ На паузе" if paused else "▶️ Активен"
         await query.edit_message_text(
             f"👤 *{_user_display(uid)}*\n"
-            f"Status: {state}\n"
-            f"Filters: {len(filters)}\n"
-            f"Last check: {last}\n\n"
-            "Tap a filter to delete it:",
+            f"Статус: {state}\n"
+            f"Фильтры: {len(filters)}\n"
+            f"Последняя проверка: {last}\n\n"
+            "Нажмите на фильтр для удаления:",
             parse_mode="Markdown",
             reply_markup=admin_user_detail_kb(uid, context.bot_data),
         )
@@ -585,9 +585,9 @@ async def on_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         if idx < len(filters):
             label = parse_filter_label(filters.pop(idx))
             save_filters(uid, filters)
-            msg = f"✅ Deleted filter: {label}"
+            msg = f"✅ Фильтр удалён: {label}"
         else:
-            msg = "⚠ Filter not found."
+            msg = "⚠ Фильтр не найден."
         if load_filters(uid):
             await query.edit_message_text(
                 msg,
@@ -596,7 +596,7 @@ async def on_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         else:
             users = [u for u in list_all_users() if load_filters(u)]
             await query.edit_message_text(
-                f"{msg}\n\n👑 *Admin Panel*\n{len(users)} user(s) with active filters:",
+                f"{msg}\n\n👑 *Панель администратора*\n{len(users)} польз. с активными фильтрами:",
                 parse_mode="Markdown",
                 reply_markup=admin_user_list_kb(context.bot_data),
             )
@@ -606,8 +606,8 @@ async def on_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         save_filters(uid, [])
         users = [u for u in list_all_users() if load_filters(u)]
         await query.edit_message_text(
-            f"✅ All filters deleted for {_user_display(uid)}\n\n"
-            f"👑 *Admin Panel*\n{len(users)} user(s) with active filters:",
+            f"✅ Все фильтры удалены для {_user_display(uid)}\n\n"
+            f"👑 *Панель администратора*\n{len(users)} польз. с активными фильтрами:",
             parse_mode="Markdown",
             reply_markup=admin_user_list_kb(context.bot_data),
         )
@@ -616,18 +616,18 @@ async def on_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         uid = int(data.split(":")[1])
         current = context.bot_data.get(f"paused_{uid}", False)
         context.bot_data[f"paused_{uid}"] = not current
-        action = "resumed" if current else "paused"
+        action = "возобновлён" if current else "приостановлен"
         filters = load_filters(uid)
         paused = not current
         last = context.bot_data.get(f"last_check_{uid}", "—")
-        state = "⏸ Paused" if paused else "▶️ Running"
+        state = "⏸ На паузе" if paused else "▶️ Активен"
         await query.edit_message_text(
-            f"✅ Scraping {action} for {_user_display(uid)}\n\n"
+            f"✅ Мониторинг {action} для {_user_display(uid)}\n\n"
             f"👤 *{_user_display(uid)}*\n"
-            f"Status: {state}\n"
-            f"Filters: {len(filters)}\n"
-            f"Last check: {last}\n\n"
-            "Tap a filter to delete it:",
+            f"Статус: {state}\n"
+            f"Фильтры: {len(filters)}\n"
+            f"Последняя проверка: {last}\n\n"
+            "Нажмите на фильтр для удаления:",
             parse_mode="Markdown",
             reply_markup=admin_user_detail_kb(uid, context.bot_data),
         )
@@ -653,12 +653,12 @@ async def cmd_add(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
     if WEBAPP_URL:
         kb = ReplyKeyboardMarkup(
-            [[KeyboardButton("🔍 Open Filter Builder", web_app=WebAppInfo(url=WEBAPP_URL))]],
+            [[KeyboardButton("🔍 Открыть конструктор фильтров", web_app=WebAppInfo(url=WEBAPP_URL))]],
             resize_keyboard=True,
             one_time_keyboard=True,
         )
         await update.message.reply_text(
-            "Open the visual filter builder or use the inline menu below:",
+            "Откройте визуальный конструктор или используйте меню ниже:",
             reply_markup=kb,
         )
 
@@ -666,7 +666,7 @@ async def cmd_add(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data["catalog"] = catalog
     context.user_data["filter"] = {}
     await update.message.reply_text(
-        "Choose a manufacturer:",
+        "Выберите производителя:",
         reply_markup=manufacturers_kb(catalog),
     )
     return MANUFACTURER
@@ -687,9 +687,9 @@ async def on_manufacturer(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         context.user_data["models"] = models
         context.user_data["model_labels"] = model_labels
         await query.edit_message_text(
-            f"*{mfr_en}* — choose a model:",
+            f"*{mfr_en}* — выберите модель:",
             parse_mode="Markdown",
-            reply_markup=paged_kb(models, "mdl", MODELS_PER_PAGE, 0, "All models", labels=model_labels),
+            reply_markup=paged_kb(models, "mdl", MODELS_PER_PAGE, 0, "Все модели", labels=model_labels),
         )
         return MODEL
     else:
@@ -699,9 +699,9 @@ async def on_manufacturer(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             context.user_data["fuel_types"] = fuel_types
             context.user_data["fuel_labels"] = fuel_labels
             await query.edit_message_text(
-                f"*{mfr_en}* — choose fuel type:",
+                f"*{mfr_en}* — выберите тип топлива:",
                 parse_mode="Markdown",
-                reply_markup=paged_kb(fuel_types, "fuel", len(fuel_types), 0, "Any fuel type", labels=fuel_labels),
+                reply_markup=paged_kb(fuel_types, "fuel", len(fuel_types), 0, "Любой тип топлива", labels=fuel_labels),
             )
             return FUEL_TYPE
         return await _ask_region(query, context)
@@ -721,9 +721,9 @@ async def on_model(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         context.user_data["fuel_types"] = fuel_types
         context.user_data["fuel_labels"] = fuel_labels
         await query.edit_message_text(
-            f"*{_summary(context.user_data['filter'])}* — fuel type:",
+            f"*{_summary(context.user_data['filter'])}* — тип топлива:",
             parse_mode="Markdown",
-            reply_markup=paged_kb(fuel_types, "fuel", len(fuel_types), 0, "Any fuel type", labels=fuel_labels),
+            reply_markup=paged_kb(fuel_types, "fuel", len(fuel_types), 0, "Любой тип топлива", labels=fuel_labels),
         )
         return FUEL_TYPE
     return await _ask_region(query, context)
@@ -736,8 +736,8 @@ async def on_model_page(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     models = context.user_data.get("models", [])
     model_labels = context.user_data.get("model_labels", models)
     await query.edit_message_text(
-        "Choose a model:",
-        reply_markup=paged_kb(models, "mdl", MODELS_PER_PAGE, page, "All models", labels=model_labels),
+        "Выберите модель:",
+        reply_markup=paged_kb(models, "mdl", MODELS_PER_PAGE, page, "Все модели", labels=model_labels),
     )
     return MODEL
 
@@ -755,9 +755,9 @@ async def on_model_skip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         context.user_data["fuel_types"] = fuel_types
         context.user_data["fuel_labels"] = fuel_labels
         await query.edit_message_text(
-            f"*{mfr_en}* — fuel type:",
+            f"*{mfr_en}* — тип топлива:",
             parse_mode="Markdown",
-            reply_markup=paged_kb(fuel_types, "fuel", len(fuel_types), 0, "Any fuel type", labels=fuel_labels),
+            reply_markup=paged_kb(fuel_types, "fuel", len(fuel_types), 0, "Любой тип топлива", labels=fuel_labels),
         )
         return FUEL_TYPE
     return await _ask_region(query, context)
@@ -787,9 +787,9 @@ async def _ask_region(query, context: ContextTypes.DEFAULT_TYPE) -> int:
         context.user_data["regions"] = regions
         context.user_data["region_labels"] = region_labels
         await query.edit_message_text(
-            f"*{_summary(context.user_data['filter'])}* — region:",
+            f"*{_summary(context.user_data['filter'])}* — регион:",
             parse_mode="Markdown",
-            reply_markup=paged_kb(regions, "reg", REGIONS_PER_PAGE, 0, "Any region", labels=region_labels),
+            reply_markup=paged_kb(regions, "reg", REGIONS_PER_PAGE, 0, "Любой регион", labels=region_labels),
         )
         return REGION
     return await _ask_price(query, context)
@@ -811,8 +811,8 @@ async def on_region_page(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     regions = context.user_data.get("regions", [])
     region_labels = context.user_data.get("region_labels", regions)
     await query.edit_message_text(
-        "Choose a region:",
-        reply_markup=paged_kb(regions, "reg", REGIONS_PER_PAGE, page, "Any region", labels=region_labels),
+        "Выберите регион:",
+        reply_markup=paged_kb(regions, "reg", REGIONS_PER_PAGE, page, "Любой регион", labels=region_labels),
     )
     return REGION
 
@@ -826,7 +826,7 @@ async def on_region_skip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 async def _ask_price(query, context: ContextTypes.DEFAULT_TYPE) -> int:
     await query.edit_message_text(
-        f"*{_summary(context.user_data['filter'])}* — price:",
+        f"*{_summary(context.user_data['filter'])}* — цена:",
         parse_mode="Markdown",
         reply_markup=options_kb(PRICE_OPTIONS, "price"),
     )
@@ -838,7 +838,7 @@ async def on_price(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     await query.answer()
     context.user_data["filter"]["price"] = PRICE_OPTIONS[int(query.data.split(":")[1])][1]
     await query.edit_message_text(
-        "Choose year range:",
+        "Выберите диапазон года:",
         reply_markup=options_kb(YEAR_OPTIONS, "year"),
     )
     return YEAR
@@ -849,7 +849,7 @@ async def on_year(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     await query.answer()
     context.user_data["filter"]["year"] = YEAR_OPTIONS[int(query.data.split(":")[1])][1]
     await query.edit_message_text(
-        "Choose mileage limit:",
+        "Выберите ограничение пробега:",
         reply_markup=options_kb(MILEAGE_OPTIONS, "mil"),
     )
     return MILEAGE
@@ -882,7 +882,7 @@ async def on_mileage(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     save_filters(user_id, filters)
 
     await query.edit_message_text(
-        f"✅ Filter added: *{parse_filter_label(filter_item)}*\n\nFetching available listings…",
+        f"✅ Фильтр добавлен: *{parse_filter_label(filter_item)}*\n\nЗагружаем доступные объявления…",
         parse_mode="Markdown",
     )
     context.bot_data[f"browse_{user_id}"] = filter_item
@@ -891,7 +891,7 @@ async def on_mileage(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    await update.message.reply_text("Cancelled.")
+    await update.message.reply_text("Отменено.")
     return ConversationHandler.END
 
 
@@ -908,7 +908,7 @@ async def on_browse_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     offset = int(query.data.split(":")[1])
     filter_item = context.bot_data.get(f"browse_{user_id}")
     if not filter_item:
-        await query.edit_message_text("Session expired. Use /filters and re-add your filter.")
+        await query.edit_message_text("Сессия истекла. Используйте /filters и пересоздайте фильтр.")
         return
 
     await query.edit_message_reply_markup(reply_markup=None)
@@ -925,12 +925,12 @@ async def on_webapp_data(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     try:
         payload = json.loads(update.message.web_app_data.data)
     except (json.JSONDecodeError, AttributeError):
-        await update.message.reply_text("⚠ Could not parse filter data from the web app.")
+        await update.message.reply_text("⚠ Не удалось разобрать данные фильтра из веб-приложения.")
         return
 
     mfr = payload.get("manufacturer")
     if not mfr:
-        await update.message.reply_text("⚠ Manufacturer is required.")
+        await update.message.reply_text("⚠ Производитель обязателен.")
         return
 
     api_query = build_filter(
@@ -951,7 +951,7 @@ async def on_webapp_data(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     save_filters(user.id, filters_list)
 
     await update.message.reply_text(
-        f"✅ Filter added: *{parse_filter_label(filter_item)}*\n\nFetching available listings…",
+        f"✅ Фильтр добавлен: *{parse_filter_label(filter_item)}*\n\nЗагружаем доступные объявления…",
         parse_mode="Markdown",
     )
     context.bot_data[f"browse_{user.id}"] = filter_item
@@ -1010,7 +1010,7 @@ async def scraper_job(context: ContextTypes.DEFAULT_TYPE) -> None:
         # Send new cars in batches of 20
         for batch_start in range(0, len(new_cars), 20):
             batch = new_cars[batch_start: batch_start + 20]
-            lines = [f"🔔 *{len(new_cars)} new listing(s) found*\n"]
+            lines = [f"🔔 *Найдено новых объявлений: {len(new_cars)}*\n"]
             for i, car in enumerate(batch, batch_start + 1):
                 lines.append(_car_line(car, i))
             text = "\n".join(lines)

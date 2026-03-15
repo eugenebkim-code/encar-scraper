@@ -94,19 +94,19 @@ function translateModel(name) {
 }
 
 const PRICE_OPTIONS = [
-  {label:"Any",value:null},{label:"≤1,000만",value:[0,1000]},{label:"≤2,000만",value:[0,2000]},
+  {label:"Любой",value:null},{label:"≤1,000만",value:[0,1000]},{label:"≤2,000만",value:[0,2000]},
   {label:"≤3,000만",value:[0,3000]},{label:"≤5,000만",value:[0,5000]},
   {label:"1,000–3,000만",value:[1000,3000]},{label:"2,000–5,000만",value:[2000,5000]},
   {label:"5,000만+",value:[5000,99999]},
 ];
 const YEAR_OPTIONS = [
-  {label:"Any",value:null},{label:"2020+",value:[202001,209912]},{label:"2022+",value:[202201,209912]},
+  {label:"Любой",value:null},{label:"2020+",value:[202001,209912]},{label:"2022+",value:[202201,209912]},
   {label:"2023+",value:[202301,209912]},{label:"2018–2022",value:[201801,202212]},
   {label:"2015–2020",value:[201501,202012]},
 ];
 const MILEAGE_OPTIONS = [
-  {label:"Any",value:null},{label:"≤30k km",value:[0,30000]},{label:"≤50k km",value:[0,50000]},
-  {label:"≤100k km",value:[0,100000]},{label:"≤150k km",value:[0,150000]},
+  {label:"Любой",value:null},{label:"≤30k км",value:[0,30000]},{label:"≤50k км",value:[0,50000]},
+  {label:"≤100k км",value:[0,100000]},{label:"≤150k км",value:[0,150000]},
 ];
 
 createApp({
@@ -237,10 +237,10 @@ createApp({
           submitLabel.value = data.label;
           submitted.value = true;
         } else {
-          submitError.value = data.error || "Failed to save filter.";
+          submitError.value = data.error || "Не удалось сохранить фильтр.";
         }
       } catch (e) {
-        submitError.value = `Network error: ${e.message}`;
+        submitError.value = `Ошибка сети: ${e.message}`;
       } finally {
         submitting.value = false;
       }
@@ -287,81 +287,81 @@ createApp({
 
   template: `
     <div class="app">
-      <h1>Encar Filter Builder</h1>
+      <h1>Конструктор фильтров Encar</h1>
 
       <div v-if="!authOk" class="auth-error">
-        ⛔ Invalid or missing link.<br>Use /link in the bot to get your personal URL.
+        ⛔ Неверная или отсутствующая ссылка.<br>Используйте /link в боте, чтобы получить вашу личную ссылку.
       </div>
 
       <template v-else-if="submitted">
-        <div class="success-msg">✅ Filter added!<br><small style="font-weight:400;font-size:13px">{{ submitLabel }}</small></div>
-        <button class="btn-submit" @click="addAnother">+ Add Another Filter</button>
+        <div class="success-msg">✅ Фильтр добавлен!<br><small style="font-weight:400;font-size:13px">{{ submitLabel }}</small></div>
+        <button class="btn-submit" @click="addAnother">+ Добавить ещё фильтр</button>
       </template>
 
       <template v-else>
         <div v-if="loadError" class="error-msg">{{ loadError }}</div>
-        <div v-else-if="!catalog" class="loading-msg">Loading catalog…</div>
+        <div v-else-if="!catalog" class="loading-msg">Загрузка каталога…</div>
 
         <template v-if="catalog">
           <div class="section">
-            <div class="section-label">Manufacturer *</div>
+            <div class="section-label">Производитель *</div>
             <select v-model="manufacturer">
-              <option value="">— Select manufacturer —</option>
+              <option value="">— Выберите производителя —</option>
               <option v-for="m in manufacturers" :key="m" :value="m">{{ mfrLabel(m) }}</option>
             </select>
           </div>
 
           <div class="section" v-if="manufacturer && models.length">
-            <div class="section-label">Model</div>
+            <div class="section-label">Модель</div>
             <div class="chips">
-              <span class="chip any" :class="{on:!model}" @click="model=null">Any</span>
+              <span class="chip any" :class="{on:!model}" @click="model=null">Любая</span>
               <span v-for="m in models" :key="m" class="chip" :class="{on:model===m}" @click="model=m">{{ modelLabel(m) }}</span>
             </div>
           </div>
 
           <div class="section" v-if="model">
-            <div class="section-label">Detailed Model</div>
+            <div class="section-label">Подробная модель</div>
             <div v-if="badgesLoading" class="spinner"></div>
             <div class="chips" v-else-if="badgeOptions.length">
-              <span class="chip any" :class="{on:!badge}" @click="badge=null">Any</span>
+              <span class="chip any" :class="{on:!badge}" @click="badge=null">Любая</span>
               <span v-for="b in badgeOptions" :key="b" class="chip" :class="{on:badge===b}" @click="badge=b">{{ b }}</span>
             </div>
-            <div v-else class="note">No detailed models found</div>
+            <div v-else class="note">Подробные модели не найдены</div>
           </div>
 
           <div class="section" v-if="manufacturer && fuelTypes.length">
-            <div class="section-label">Fuel Type</div>
+            <div class="section-label">Тип топлива</div>
             <div class="chips">
-              <span class="chip any" :class="{on:!fuelType}" @click="fuelType=null">Any</span>
+              <span class="chip any" :class="{on:!fuelType}" @click="fuelType=null">Любой</span>
               <span v-for="f in fuelTypes" :key="f" class="chip" :class="{on:fuelType===f}" @click="fuelType=f">{{ fuelLabel(f) }}</span>
             </div>
           </div>
 
           <div class="section" v-if="manufacturer">
-            <div class="section-label">Region</div>
+            <div class="section-label">Регион</div>
             <div class="chips">
-              <span class="chip any" :class="{on:!region}" @click="region=null">Any</span>
+              <span class="chip any" :class="{on:!region}" @click="region=null">Любой</span>
               <span v-for="r in regions" :key="r" class="chip" :class="{on:region===r}" @click="region=r">{{ regionLabel(r) }}</span>
             </div>
           </div>
 
           <div class="section" v-if="manufacturer">
-            <div class="section-label">Price (만 KRW)</div>
+            <div class="section-label">Цена (만 KRW)</div>
             <div class="chips">
               <span v-for="opt in PRICE_OPTIONS" :key="opt.label" class="chip" :class="{on:eq(price,opt.value), any:!opt.value}" @click="price=opt.value">{{ opt.label }}</span>
             </div>
           </div>
 
           <div class="section" v-if="manufacturer">
-            <div class="section-label">Year</div>
+            <div class="section-label">Год</div>
             <div class="chips">
               <span v-for="opt in YEAR_OPTIONS" :key="opt.label" class="chip" :class="{on:eq(year,opt.value), any:!opt.value}" @click="year=opt.value">{{ opt.label }}</span>
             </div>
-            <div class="note">Year is applied locally after fetching</div>
+            <div class="note">Год фильтруется локально после загрузки</div>
           </div>
 
           <div class="section" v-if="manufacturer">
-            <div class="section-label">Mileage</div>
+            <div class="section-label">Пробег</div>
             <div class="chips">
               <span v-for="opt in MILEAGE_OPTIONS" :key="opt.label" class="chip" :class="{on:eq(mileage,opt.value), any:!opt.value}" @click="mileage=opt.value">{{ opt.label }}</span>
             </div>
@@ -371,14 +371,14 @@ createApp({
             <div v-if="countLoading" class="spinner"></div>
             <div v-else-if="liveCount !== null" class="count-num">{{ liveCount.toLocaleString() }}</div>
             <div v-else class="count-num" style="color:var(--muted)">—</div>
-            <div class="count-label">matching listings on Encar</div>
+            <div class="count-label">объявлений на Encar</div>
           </div>
 
           <div v-if="submitError" class="error-msg">{{ submitError }}</div>
 
           <button class="btn-submit" :disabled="!canSubmit" @click="submit">
             <span v-if="submitting" class="spinner" style="vertical-align:middle;margin-right:8px"></span>
-            Add Filter
+            Добавить фильтр
           </button>
         </template>
       </template>

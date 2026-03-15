@@ -208,19 +208,19 @@ function translateModel(name) {
 
 // ── Option tables ─────────────────────────────────────────────────────────────
 const PRICE_OPTIONS = [
-  {label:"Any",value:null},{label:"≤1,000만",value:[0,1000]},{label:"≤2,000만",value:[0,2000]},
+  {label:"Любой",value:null},{label:"≤1,000만",value:[0,1000]},{label:"≤2,000만",value:[0,2000]},
   {label:"≤3,000만",value:[0,3000]},{label:"≤5,000만",value:[0,5000]},
   {label:"1,000–3,000만",value:[1000,3000]},{label:"2,000–5,000만",value:[2000,5000]},
   {label:"5,000만+",value:[5000,99999]},
 ];
 const YEAR_OPTIONS = [
-  {label:"Any",value:null},{label:"2020+",value:[202001,209912]},{label:"2022+",value:[202201,209912]},
+  {label:"Любой",value:null},{label:"2020+",value:[202001,209912]},{label:"2022+",value:[202201,209912]},
   {label:"2023+",value:[202301,209912]},{label:"2018–2022",value:[201801,202212]},
   {label:"2015–2020",value:[201501,202012]},
 ];
 const MILEAGE_OPTIONS = [
-  {label:"Any",value:null},{label:"≤30k km",value:[0,30000]},{label:"≤50k km",value:[0,50000]},
-  {label:"≤100k km",value:[0,100000]},{label:"≤150k km",value:[0,150000]},
+  {label:"Любой",value:null},{label:"≤30k км",value:[0,30000]},{label:"≤50k км",value:[0,50000]},
+  {label:"≤100k км",value:[0,100000]},{label:"≤150k км",value:[0,150000]},
 ];
 
 // ── App ───────────────────────────────────────────────────────────────────────
@@ -393,24 +393,24 @@ createApp({
       <h1>🔍 Filter Builder</h1>
 
       <div v-if="loadError" class="error-msg">{{ loadError }}</div>
-      <div v-else-if="!catalog" class="loading-msg">Loading catalog…</div>
+      <div v-else-if="!catalog" class="loading-msg">Загрузка каталога…</div>
 
       <template v-if="catalog">
 
         <!-- Manufacturer -->
         <div class="section">
-          <div class="section-label">Manufacturer *</div>
+          <div class="section-label">Производитель *</div>
           <select v-model="manufacturer">
-            <option value="">— Select manufacturer —</option>
+            <option value="">— Выберите производителя —</option>
             <option v-for="m in manufacturers" :key="m" :value="m">{{ mfrLabel(m) }}</option>
           </select>
         </div>
 
         <!-- Model -->
         <div class="section" v-if="manufacturer && models.length">
-          <div class="section-label">Model</div>
+          <div class="section-label">Модель</div>
           <div class="chips">
-            <span class="chip any" :class="{on:!model}" @click="model=null">Any</span>
+            <span class="chip any" :class="{on:!model}" @click="model=null">Любая</span>
             <span
               v-for="m in models" :key="m"
               class="chip" :class="{on:model===m}"
@@ -421,24 +421,24 @@ createApp({
 
         <!-- Detailed Model (Badge) -->
         <div class="section" v-if="model">
-          <div class="section-label">Detailed Model</div>
+          <div class="section-label">Подробная модель</div>
           <div v-if="badgesLoading" class="spinner"></div>
           <div class="chips" v-else-if="badgeOptions.length">
-            <span class="chip any" :class="{on:!badge}" @click="badge=null">Any</span>
+            <span class="chip any" :class="{on:!badge}" @click="badge=null">Любая</span>
             <span
               v-for="b in badgeOptions" :key="b"
               class="chip" :class="{on:badge===b}"
               @click="badge=b"
             >{{ b }}</span>
           </div>
-          <div v-else class="note">No detailed models found</div>
+          <div v-else class="note">Подробные модели не найдены</div>
         </div>
 
         <!-- Fuel Type -->
         <div class="section" v-if="manufacturer && fuelTypes.length">
-          <div class="section-label">Fuel Type</div>
+          <div class="section-label">Тип топлива</div>
           <div class="chips">
-            <span class="chip any" :class="{on:!fuelType}" @click="fuelType=null">Any</span>
+            <span class="chip any" :class="{on:!fuelType}" @click="fuelType=null">Любой</span>
             <span
               v-for="f in fuelTypes" :key="f"
               class="chip" :class="{on:fuelType===f}"
@@ -449,9 +449,9 @@ createApp({
 
         <!-- Region -->
         <div class="section" v-if="manufacturer">
-          <div class="section-label">Region</div>
+          <div class="section-label">Регион</div>
           <div class="chips">
-            <span class="chip any" :class="{on:!region}" @click="region=null">Any</span>
+            <span class="chip any" :class="{on:!region}" @click="region=null">Любой</span>
             <span
               v-for="r in regions" :key="r"
               class="chip" :class="{on:region===r}"
@@ -462,7 +462,7 @@ createApp({
 
         <!-- Price -->
         <div class="section" v-if="manufacturer">
-          <div class="section-label">Price (만 KRW)</div>
+          <div class="section-label">Цена (만 KRW)</div>
           <div class="chips">
             <span
               v-for="opt in PRICE_OPTIONS" :key="opt.label"
@@ -474,7 +474,7 @@ createApp({
 
         <!-- Year -->
         <div class="section" v-if="manufacturer">
-          <div class="section-label">Year</div>
+          <div class="section-label">Год</div>
           <div class="chips">
             <span
               v-for="opt in YEAR_OPTIONS" :key="opt.label"
@@ -482,12 +482,12 @@ createApp({
               @click="year=opt.value"
             >{{ opt.label }}</span>
           </div>
-          <div class="note">Year is applied locally after fetching (API limitation)</div>
+          <div class="note">Год фильтруется локально после загрузки</div>
         </div>
 
         <!-- Mileage -->
         <div class="section" v-if="manufacturer">
-          <div class="section-label">Mileage</div>
+          <div class="section-label">Пробег</div>
           <div class="chips">
             <span
               v-for="opt in MILEAGE_OPTIONS" :key="opt.label"
@@ -502,12 +502,12 @@ createApp({
           <div v-if="countLoading" class="spinner"></div>
           <div v-else-if="liveCount !== null" class="count-num">{{ liveCount.toLocaleString() }}</div>
           <div v-else class="count-num" style="color:var(--muted)">—</div>
-          <div class="count-label">matching listings on Encar</div>
+          <div class="count-label">объявлений на Encar</div>
         </div>
 
         <!-- Submit -->
         <button class="btn-submit" :disabled="!canSubmit" @click="submit">
-          ✅ Add Filter
+          ✅ Добавить фильтр
         </button>
 
       </template>
