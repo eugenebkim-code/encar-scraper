@@ -105,10 +105,12 @@ MANUFACTURER_EN: dict[str, str] = {
 FUEL_TYPE_EN: dict[str, str] = {
     "CNG": "CNG",
     "LPG(일반인 구입)": "LPG (Public)",
+    "LPG+전기": "LPG + Electric",
     "가솔린": "Gasoline",
     "가솔린+LPG": "Gasoline + LPG",
     "가솔린+전기": "Gasoline + Electric",
     "디젤": "Diesel",
+    "수소": "Hydrogen",
     "전기": "Electric",
 }
 
