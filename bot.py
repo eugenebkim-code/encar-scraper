@@ -203,11 +203,13 @@ def parse_filter_label(item) -> str:
         else:
             parts.append(f"{lo:,}–{hi:,}만 KRW")
     if year_range:
-        lo_y, hi_y = str(year_range[0])[:4], str(year_range[1])[:4]
-        if int(hi_y) >= 2090:
-            parts.append(f"{lo_y}+")
+        lo_s, hi_s = str(year_range[0]).zfill(6), str(year_range[1]).zfill(6)
+        lo_fmt = f"{lo_s[:4]}.{lo_s[4:]}"
+        hi_fmt = f"{hi_s[:4]}.{hi_s[4:]}"
+        if int(hi_s[:4]) >= 2090:
+            parts.append(f"{lo_fmt}+")
         else:
-            parts.append(f"{lo_y}–{hi_y}")
+            parts.append(f"{lo_fmt}–{hi_fmt}")
     if m := re.search(r"Mileage\.(\d+)\|(\d+)\.", query):
         hi = int(m.group(2))
         parts.append(f"до {hi:,} км")

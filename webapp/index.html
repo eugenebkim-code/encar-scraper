@@ -131,6 +131,12 @@
     }
     .btn-submit:disabled { opacity: 0.35; cursor: not-allowed; }
 
+    .year-range { display: flex; flex-direction: column; gap: 8px; }
+    .year-row { display: flex; align-items: center; gap: 8px; }
+    .year-row-label { font-size: 13px; color: var(--muted); width: 28px; flex-shrink: 0; }
+    .year-sep { font-size: 14px; color: var(--muted); }
+    .year-row select { flex: 1; }
+
     .note { font-size: 12px; color: var(--muted); line-height: 1.5; }
     .error-msg { font-size: 13px; color: #dc2626; }
     .loading-msg { font-size: 14px; color: var(--muted); padding: 40px 0; text-align: center; }
@@ -214,11 +220,7 @@ const PRICE_OPTIONS = [
   {label:"1,000–3,000만",value:[1000,3000]},{label:"2,000–5,000만",value:[2000,5000]},
   {label:"5,000만+",value:[5000,99999]},
 ];
-const YEAR_OPTIONS = [
-  {label:"Любой",value:null},{label:"2020+",value:[202001,209912]},{label:"2022+",value:[202201,209912]},
-  {label:"2023+",value:[202301,209912]},{label:"2018–2022",value:[201801,202212]},
-  {label:"2015–2020",value:[201501,202012]},
-];
+// Year options built dynamically in setup()
 const MILEAGE_OPTIONS = [
   {label:"Любой",value:null},{label:"≤30k км",value:[0,30000]},{label:"≤50k км",value:[0,50000]},
   {label:"≤100k км",value:[0,100000]},{label:"≤150k км",value:[0,150000]},
@@ -236,8 +238,33 @@ createApp({
     const fuelType = ref(null);
     const region = ref(null);
     const price = ref(null);
-    const year = ref(null);
     const mileage = ref(null);
+
+    // Year range: from/to as separate year+month selectors
+    const yearFromY = ref("");
+    const yearFromM = ref("01");
+    const yearToY = ref("");
+    const yearToM = ref("12");
+    const year = ref(null);
+
+    const curYear = new Date().getFullYear();
+    const yearOptions = [];
+    for (let y = curYear; y >= 2000; y--) yearOptions.push(String(y));
+    const monthOptions = Array.from({length:12}, (_,i) => String(i+1).padStart(2,"0"));
+
+    watch([yearFromY, yearFromM, yearToY, yearToM], () => {
+      const hasFrom = !!yearFromY.value;
+      const hasTo   = !!yearToY.value;
+      if (!hasFrom && !hasTo) { year.value = null; return; }
+      const from = hasFrom ? parseInt(yearFromY.value + yearFromM.value) : 200001;
+      const to   = hasTo   ? parseInt(yearToY.value   + yearToM.value)   : 209912;
+      year.value = [Math.min(from, to), Math.max(from, to)];
+    });
+
+    function clearYear() {
+      yearFromY.value = ""; yearFromM.value = "01";
+      yearToY.value  = ""; yearToM.value  = "12";
+    }
 
     const badgeOptions = ref([]);
     const badgesLoading = ref(false);
@@ -401,7 +428,8 @@ createApp({
       catalog, loadError,
       manufacturer, model, badge, fuelType, region, price, year, mileage,
       manufacturers, models, badgeOptions, badgesLoading, fuelTypes, regions,
-      PRICE_OPTIONS, YEAR_OPTIONS, MILEAGE_OPTIONS,
+      PRICE_OPTIONS, MILEAGE_OPTIONS,
+      yearFromY, yearFromM, yearToY, yearToM, yearOptions, monthOptions, clearYear,
       liveCount, countLoading, canSubmit, submit, submitting, submitError,
       mfrLabel: k => MFR_EN[k] || k,
       modelLabel: translateModel,
@@ -497,13 +525,33 @@ createApp({
 
         <!-- Year -->
         <div class="section" v-if="manufacturer">
-          <div class="section-label">Год</div>
-          <div class="chips">
-            <span
-              v-for="opt in YEAR_OPTIONS" :key="opt.label"
-              class="chip" :class="{on:eq(year,opt.value), any:!opt.value}"
-              @click="year=opt.value"
-            >{{ opt.label }}</span>
+          <div class="section-label">Год выпуска</div>
+          <div class="year-range">
+            <div class="year-row">
+              <span class="year-row-label">С</span>
+              <select v-model="yearFromY">
+                <option value="">—</option>
+                <option v-for="y in yearOptions" :key="y" :value="y">{{ y }}</option>
+              </select>
+              <span class="year-sep">.</span>
+              <select v-model="yearFromM" :disabled="!yearFromY">
+                <option v-for="m in monthOptions" :key="m" :value="m">{{ m }}</option>
+              </select>
+            </div>
+            <div class="year-row">
+              <span class="year-row-label">По</span>
+              <select v-model="yearToY">
+                <option value="">—</option>
+                <option v-for="y in yearOptions" :key="y" :value="y">{{ y }}</option>
+              </select>
+              <span class="year-sep">.</span>
+              <select v-model="yearToM" :disabled="!yearToY">
+                <option v-for="m in monthOptions" :key="m" :value="m">{{ m }}</option>
+              </select>
+            </div>
+          </div>
+          <div style="margin-top:6px">
+            <span class="chip any" :class="{on:!year}" @click="clearYear()">Любой</span>
           </div>
           <div class="note">Год фильтруется локально после загрузки</div>
         </div>
