@@ -202,14 +202,46 @@ def fetch(query: str, offset: int = 0, size: int = 100) -> tuple[int, list[dict]
     return data.get("Count", 0), data.get("SearchResults", [])
 
 
-def scan_manufacturer(manufacturer: str, car_type: str, pages: int = 3) -> dict:
-    """Fetch multiple pages for a manufacturer and collect all unique field values."""
+def scan_manufacturer(manufacturer: str, car_type: str, pages: int = None) -> dict:
+    """Fetch multiple pages for a manufacturer and collect all unique field values.
+
+    Pages are auto-scaled by listing count so rare models aren't missed:
+      < 1 000 listings  → 5 pages  (500 cars)
+      < 5 000 listings  → 10 pages (1 000 cars)
+      < 20 000 listings → 20 pages (2 000 cars)
+      ≥ 20 000 listings → 40 pages (4 000 cars)
+    """
     query = f"(And.(And.Hidden.N._.(C.CarType.{car_type}._.Manufacturer.{manufacturer}.)))"
 
     collected: dict[str, set] = defaultdict(set)
     count = 0
 
-    for page in range(pages):
+    # First fetch to get total count, then decide depth
+    if pages is None:
+        try:
+            total, first_cars = fetch(query, offset=0, size=100)
+            count = total
+            for car in first_cars:
+                for field in COLLECT_FIELDS:
+                    val = car.get(field)
+                    if val and isinstance(val, str) and val.strip():
+                        collected[field].add(val.strip())
+            if total < 1_000:
+                pages = 5
+            elif total < 5_000:
+                pages = 10
+            elif total < 20_000:
+                pages = 20
+            else:
+                pages = 40
+            start_page = 1  # already fetched page 0
+        except Exception as e:
+            print(f"  [warn] initial fetch: {e}")
+            return {"count": 0, "data": {}}
+    else:
+        start_page = 0
+
+    for page in range(start_page, pages):
         try:
             total, cars = fetch(query, offset=page * 100, size=100)
             if page == 0:
