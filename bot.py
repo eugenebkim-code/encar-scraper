@@ -229,8 +229,8 @@ BROWSE_PAGE = 30
 
 
 def _car_line(car: dict, idx: int) -> str:
-    year_raw = str(int(car.get("Year") or 0))
-    year = year_raw[:4] if len(year_raw) >= 4 else year_raw
+    year_raw = str(int(car.get("Year") or 0)).zfill(6)
+    year = f"{year_raw[:4]}.{year_raw[4:]}" if len(year_raw) >= 6 and year_raw[4:] != "00" else year_raw[:4]
     mileage = int(car.get("Mileage") or 0)
     price = int(car.get("Price") or 0)
     region = REGION_EN.get(car.get("OfficeCityState", ""), car.get("OfficeCityState", ""))
