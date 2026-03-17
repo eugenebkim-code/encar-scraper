@@ -32,7 +32,7 @@ from storage import (
     list_all_users,
 )
 from translations import (
-    MANUFACTURER_EN, FUEL_TYPE_EN, REGION_EN,
+    MANUFACTURER_EN, FUEL_TYPE_EN, REGION_EN, COLOR_EN,
     translate_model,
 )
 
@@ -224,6 +224,9 @@ def parse_filter_label(item) -> str:
     if m := re.search(r"Mileage\.(\d+)\|(\d+)\.", query):
         hi = int(m.group(2))
         parts.append(f"до {hi:,} км")
+    if m := re.search(r"Color\.([^.]+)\.", query):
+        kr = m.group(1)
+        parts.append(COLOR_EN.get(kr, kr))
     return " | ".join(parts) if parts else query[:60]
 
 
