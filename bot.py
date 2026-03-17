@@ -135,6 +135,13 @@ def get_regions(catalog: dict) -> list[str]:
 
 # ── Filter helpers ─────────────────────────────────────────────────────────────
 
+def _mileage_range(query: str):
+    """Extract mileage range from query string for local filtering.
+    The Encar API silently ignores Mileage in q=, so we filter client-side."""
+    m = re.search(r"Mileage\.(\d+)\|(\d+)\.", query)
+    return (int(m.group(1)), int(m.group(2))) if m else None
+
+
 def build_filter(
     manufacturer: str,
     car_type: str = "Y",
@@ -144,11 +151,13 @@ def build_filter(
     region=None,
     price=None,
     mileage=None,
+    color=None,
 ) -> str:
     """Build the Encar API query string.
 
     Year is intentionally excluded — the API returns 404 for any Year filter
     in the q= parameter. Year filtering is applied client-side after fetching.
+    Mileage is included in the query but also filtered client-side (API ignores it).
     """
     extra = []
     if model:
@@ -163,6 +172,8 @@ def build_filter(
         extra.append(f"Price.{price[0]}|{price[1]}.")
     if mileage:
         extra.append(f"Mileage.{mileage[0]}|{mileage[1]}.")
+    if color:
+        extra.append(f"Color.{color}.")
     extra_str = "".join(f"_.{c}" for c in extra)
     return f"(And.(And.Hidden.N._.(C.CarType.{car_type}._.Manufacturer.{manufacturer}.)){extra_str})"
 
@@ -264,14 +275,24 @@ async def _send_browse_page(
         lo, hi = year_range
         cars = [c for c in cars if lo <= (c.get("Year") or 0) <= hi]
 
+    mil_range = _mileage_range(q)
+    if mil_range:
+        lo, hi = mil_range
+        cars = [c for c in cars if lo <= (c.get("Mileage") or 0) <= hi]
+
     if not cars:
         msg = "Объявлений по этому фильтру не найдено." if offset == 0 else "✅ Больше объявлений нет."
         await bot.send_message(chat_id=user_id, text=msg)
         return
 
-    header = f"📋 *{total:,} объявлений* · показано {offset + 1}–{offset + len(cars)}"
+    local_note = []
     if year_range:
-        header += " _(год отфильтрован локально)_"
+        local_note.append("год")
+    if mil_range:
+        local_note.append("пробег")
+    header = f"📋 *{total:,} объявлений* · показано {offset + 1}–{offset + len(cars)}"
+    if local_note:
+        header += f" _({', '.join(local_note)} отфильтровано локально)_"
     lines = [header, ""]
     for i, car in enumerate(cars, offset + 1):
         lines.append(_car_line(car, i))
@@ -322,6 +343,11 @@ async def _seed_and_show(
     if year_range:
         lo, hi = year_range
         seed_cars = [c for c in seed_cars if lo <= (c.get("Year") or 0) <= hi]
+
+    mil_range = _mileage_range(q)
+    if mil_range:
+        lo, hi = mil_range
+        seed_cars = [c for c in seed_cars if lo <= (c.get("Mileage") or 0) <= hi]
 
     seen_ids: set[str] = bot_data.setdefault(
         f"seen_{user_id}", load_seen_ids(user_id)
@@ -994,6 +1020,7 @@ async def on_webapp_data(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         region=payload.get("region") or None,
         price=tuple(payload["price"]) if payload.get("price") else None,
         mileage=tuple(payload["mileage"]) if payload.get("mileage") else None,
+        color=payload.get("color") or None,
     )
     year = payload.get("year")
     filter_item = {"q": api_query, "year": list(year)} if year else api_query
@@ -1052,6 +1079,11 @@ async def scraper_job(context: ContextTypes.DEFAULT_TYPE) -> None:
             if year_range:
                 lo, hi = year_range
                 cars = [c for c in cars if lo <= (c.get("Year") or 0) <= hi]
+
+            mil_range = _mileage_range(filter_query)
+            if mil_range:
+                lo, hi = mil_range
+                cars = [c for c in cars if lo <= (c.get("Mileage") or 0) <= hi]
 
             for car in cars:
                 car_id = str(car.get("Id", ""))

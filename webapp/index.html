@@ -137,6 +137,13 @@
     .year-sep { font-size: 14px; color: var(--muted); }
     .year-row select { flex: 1; }
 
+    .slider-wrap { display: flex; flex-direction: column; gap: 6px; }
+    .slider-val { font-size: 14px; font-weight: 600; color: var(--accent); }
+    input[type=range] {
+      width: 100%; height: 6px; accent-color: var(--accent);
+      cursor: pointer; border-radius: 3px;
+    }
+
     .note { font-size: 12px; color: var(--muted); line-height: 1.5; }
     .error-msg { font-size: 13px; color: #dc2626; }
     .loading-msg { font-size: 14px; color: var(--muted); padding: 40px 0; text-align: center; }
@@ -221,9 +228,23 @@ const PRICE_OPTIONS = [
   {label:"5,000만+",value:[5000,99999]},
 ];
 // Year options built dynamically in setup()
-const MILEAGE_OPTIONS = [
-  {label:"Любой",value:null},{label:"≤30k км",value:[0,30000]},{label:"≤50k км",value:[0,50000]},
-  {label:"≤100k км",value:[0,100000]},{label:"≤150k км",value:[0,150000]},
+
+const COLOR_OPTIONS = [
+  {kr:"흰색",   en:"Белый",    dot:"#f0f0f0"},
+  {kr:"검정색", en:"Чёрный",   dot:"#222222"},
+  {kr:"회색",   en:"Серый",    dot:"#888888"},
+  {kr:"은색",   en:"Серебряный",dot:"#c8c8c8"},
+  {kr:"빨간색", en:"Красный",  dot:"#e53e3e"},
+  {kr:"파란색", en:"Синий",    dot:"#3182ce"},
+  {kr:"갈색",   en:"Коричневый",dot:"#7b5e3a"},
+  {kr:"금색",   en:"Золотой",  dot:"#d4a017"},
+  {kr:"하늘색", en:"Голубой",  dot:"#90cdf4"},
+  {kr:"주황색", en:"Оранжевый",dot:"#ed8936"},
+  {kr:"녹색",   en:"Зелёный",  dot:"#38a169"},
+  {kr:"보라색", en:"Фиолетовый",dot:"#805ad5"},
+  {kr:"분홍색", en:"Розовый",  dot:"#ed64a6"},
+  {kr:"노란색", en:"Жёлтый",   dot:"#ecc94b"},
+  {kr:"기타",   en:"Другой",   dot:"linear-gradient(135deg,#e53e3e,#3182ce,#38a169)"},
 ];
 
 // ── App ───────────────────────────────────────────────────────────────────────
@@ -238,7 +259,19 @@ createApp({
     const fuelType = ref(null);
     const region = ref(null);
     const price = ref(null);
-    const mileage = ref(null);
+    const color = ref(null);
+
+    // Mileage slider: maxKm = 0 means "Any"
+    const mileageMax = ref(0);
+    const MILEAGE_STEP = 5000;
+    const MILEAGE_MAX_VAL = 300000;
+    const mileage = computed(() =>
+      mileageMax.value > 0 ? [0, mileageMax.value] : null
+    );
+    function mileageLabel(km) {
+      if (!km) return "Любой";
+      return `до ${(km/1000).toFixed(0)}k км`;
+    }
 
     // Year range: from/to as separate year+month selectors
     const yearFromY = ref("");
@@ -353,7 +386,7 @@ createApp({
       countTimer = setTimeout(fetchCount, 700);
     }
 
-    watch([manufacturer, model, fuelType, region, price, mileage], scheduleFetch);
+    watch([manufacturer, model, fuelType, region, price, mileageMax, color], scheduleFetch);
 
     // Reset dependent fields on manufacturer/model change
     watch(manufacturer, () => { model.value = null; badge.value = null; fuelType.value = null; badgeOptions.value = []; });
@@ -374,6 +407,7 @@ createApp({
         price: price.value || null,
         mileage: mileage.value || null,
         year: year.value || null,
+        color: color.value || null,
       };
       const tg = window.Telegram?.WebApp;
       if (!tg?.initData) {
@@ -427,8 +461,10 @@ createApp({
     return {
       catalog, loadError,
       manufacturer, model, badge, fuelType, region, price, year, mileage,
+      color, COLOR_OPTIONS,
+      mileageMax, MILEAGE_STEP, MILEAGE_MAX_VAL, mileageLabel,
       manufacturers, models, badgeOptions, badgesLoading, fuelTypes, regions,
-      PRICE_OPTIONS, MILEAGE_OPTIONS,
+      PRICE_OPTIONS,
       yearFromY, yearFromM, yearToY, yearToM, yearOptions, monthOptions, clearYear,
       liveCount, countLoading, canSubmit, submit, submitting, submitError,
       mfrLabel: k => MFR_EN[k] || k,
@@ -559,12 +595,33 @@ createApp({
         <!-- Mileage -->
         <div class="section" v-if="manufacturer">
           <div class="section-label">Пробег</div>
+          <div class="slider-wrap">
+            <div class="slider-val">{{ mileageLabel(mileageMax) }}</div>
+            <input type="range" :min="0" :max="MILEAGE_MAX_VAL" :step="MILEAGE_STEP" v-model.number="mileageMax" />
+            <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted)">
+              <span>Любой</span><span>300k км</span>
+            </div>
+          </div>
+          <div style="margin-top:6px">
+            <span class="chip any" :class="{on:!mileageMax}" @click="mileageMax=0">Любой</span>
+          </div>
+          <div class="note">Пробег фильтруется локально после загрузки</div>
+        </div>
+
+        <!-- Color -->
+        <div class="section" v-if="manufacturer">
+          <div class="section-label">Цвет кузова</div>
           <div class="chips">
+            <span class="chip any" :class="{on:!color}" @click="color=null">Любой</span>
             <span
-              v-for="opt in MILEAGE_OPTIONS" :key="opt.label"
-              class="chip" :class="{on:eq(mileage,opt.value), any:!opt.value}"
-              @click="mileage=opt.value"
-            >{{ opt.label }}</span>
+              v-for="c in COLOR_OPTIONS" :key="c.kr"
+              class="chip" :class="{on:color===c.kr}"
+              @click="color=c.kr"
+              style="display:flex;align-items:center;gap:5px"
+            >
+              <span :style="{width:'10px',height:'10px',borderRadius:'50%',display:'inline-block',flexShrink:0,background:c.dot,border:'1px solid #ccc'}"></span>
+              {{ c.en }}
+            </span>
           </div>
         </div>
 

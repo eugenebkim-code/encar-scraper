@@ -141,6 +141,7 @@ async def handle_add_filter(request: web.Request) -> web.Response:
         region=payload.get("region") or None,
         price=tuple(payload["price"]) if payload.get("price") else None,
         mileage=tuple(payload["mileage"]) if payload.get("mileage") else None,
+        color=payload.get("color") or None,
     )
     year = payload.get("year")
     filter_item = {"q": api_query, "year": list(year)} if year else api_query
@@ -209,6 +210,7 @@ async def handle_add_filter_tg(request: web.Request) -> web.Response:
         region=payload.get("region") or None,
         price=tuple(payload["price"]) if payload.get("price") else None,
         mileage=tuple(payload["mileage"]) if payload.get("mileage") else None,
+        color=payload.get("color") or None,
     )
     year = payload.get("year")
     filter_item = {"q": api_query, "year": list(year)} if year else api_query
