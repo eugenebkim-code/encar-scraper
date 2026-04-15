@@ -23,7 +23,8 @@ def load_catalog() -> dict[str, list[str]]:
     if not os.path.exists(CATALOG_FILE):
         return {}
     with open(CATALOG_FILE, "r", encoding="utf-8") as f:
-        return json.load(f)
+        data = json.load(f)
+    return data.get("manufacturers", data)
 
 PRICE_RANGES = [
     {"name": "No limit", "value": None},
