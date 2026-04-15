@@ -1,0 +1,6 @@
+{
+  "filters": [
+    "(And.(And.Hidden.N._.(C.CarType.N._.Manufacturer.람보르기니.))_.Model.무르시엘라고.)",
+    "(And.(And.Hidden.N._.(C.CarType.Y._.Manufacturer.현대.))_.Model.스타리아.)"
+  ]
+}
