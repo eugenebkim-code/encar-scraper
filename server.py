@@ -144,7 +144,13 @@ async def handle_add_filter(request: web.Request) -> web.Response:
         color=payload.get("color") or None,
     )
     year = payload.get("year")
-    filter_item = {"q": api_query, "year": list(year)} if year else api_query
+    badge = payload.get("badge") or None
+    meta: dict = {"q": api_query}
+    if year:
+        meta["year"] = list(year)
+    if badge:
+        meta["badge"] = badge
+    filter_item = meta if (year or badge) else api_query
 
     filters = load_filters(user_id)
     filters.append(filter_item)
@@ -213,7 +219,13 @@ async def handle_add_filter_tg(request: web.Request) -> web.Response:
         color=payload.get("color") or None,
     )
     year = payload.get("year")
-    filter_item = {"q": api_query, "year": list(year)} if year else api_query
+    badge = payload.get("badge") or None
+    meta: dict = {"q": api_query}
+    if year:
+        meta["year"] = list(year)
+    if badge:
+        meta["badge"] = badge
+    filter_item = meta if (year or badge) else api_query
 
     filters = load_filters(user_id)
     filters.append(filter_item)

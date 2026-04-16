@@ -188,7 +188,9 @@ createApp({
     }
 
     async function fetchCount() {
-      const q = buildQuery();
+      // Exclude badge from count query: badge values often contain dots that
+      // corrupt the Encar DSL syntax and cause 400 errors.
+      const q = buildQuery({ includeBadge: false });
       if (!q) { liveCount.value = null; return; }
       countLoading.value = true;
       try {

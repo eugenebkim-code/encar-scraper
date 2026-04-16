@@ -157,13 +157,15 @@ def build_filter(
 
     Year is intentionally excluded — the API returns 404 for any Year filter
     in the q= parameter. Year filtering is applied client-side after fetching.
+    Badge is intentionally excluded — badge values often contain dots (e.g.
+    "2.0 MPI", "1.6 T-GDI") which corrupt the dot-delimited DSL syntax and
+    cause 400 errors. Badge filtering is applied client-side after fetching.
     Mileage is included in the query but also filtered client-side (API ignores it).
     """
     extra = []
     if model:
         extra.append(f"Model.{model}.")
-    if badge:
-        extra.append(f"Badge.{badge}.")
+    # badge intentionally omitted from API query — see docstring
     if fuel_type:
         extra.append(f"FuelType.{fuel_type}.")
     if region:
@@ -181,15 +183,17 @@ def build_filter(
 def parse_filter_label(item) -> str:
     """Return a human-readable English label for a stored filter item.
 
-    A filter item is either a plain query string (legacy) or a dict
-    {"q": "...", "year": [lo, hi]} when a year constraint is set.
+    A filter item is either a plain query string (legacy) or a dict with
+    keys: "q" (query string), "year" ([lo, hi]), "badge" (string).
     """
     if isinstance(item, dict):
         query = item.get("q", "")
         year_range = item.get("year")
+        badge = item.get("badge")
     else:
         query = item
         year_range = None
+        badge = None
 
     parts = []
     if m := re.search(r"Manufacturer\.([^.]+)\.", query):
@@ -197,7 +201,11 @@ def parse_filter_label(item) -> str:
         parts.append(MANUFACTURER_EN.get(kr, kr))
     if m := re.search(r"Model\.([^.]+)\.", query):
         parts.append(translate_model(m.group(1)))
-    if m := re.search(r"Badge\.([^.]+)\.", query):
+    # Badge: prefer metadata (new filters); fall back to query string (legacy filters
+    # saved before the client-side migration, where badge had no dots)
+    if badge:
+        parts.append(badge)
+    elif m := re.search(r"Badge\.([^.]+)\.", query):
         parts.append(m.group(1))
     if m := re.search(r"FuelType\.([^.]+)\.", query):
         kr = m.group(1)
@@ -264,9 +272,11 @@ async def _send_browse_page(
     if isinstance(filter_item, dict):
         q = filter_item["q"]
         year_range = filter_item.get("year")
+        badge = filter_item.get("badge")
     else:
         q = filter_item
         year_range = None
+        badge = None
 
     try:
         total, cars = await asyncio.to_thread(fetch_page, q, offset, BROWSE_PAGE)
@@ -283,6 +293,9 @@ async def _send_browse_page(
         lo, hi = mil_range
         cars = [c for c in cars if lo <= (c.get("Mileage") or 0) <= hi]
 
+    if badge:
+        cars = [c for c in cars if c.get("Badge", "") == badge]
+
     if not cars:
         msg = "Объявлений по этому фильтру не найдено." if offset == 0 else "✅ Больше объявлений нет."
         await bot.send_message(chat_id=user_id, text=msg)
@@ -293,6 +306,8 @@ async def _send_browse_page(
         local_note.append("год")
     if mil_range:
         local_note.append("пробег")
+    if badge:
+        local_note.append("подробная модель")
     header = f"📋 *{total:,} объявлений* · показано {offset + 1}–{offset + len(cars)}"
     if local_note:
         header += f" _({', '.join(local_note)} отфильтровано локально)_"
@@ -335,6 +350,7 @@ async def _seed_and_show(
     """Seed seen IDs from current listings, then show first page of results."""
     q = filter_item["q"] if isinstance(filter_item, dict) else filter_item
     year_range = filter_item.get("year") if isinstance(filter_item, dict) else None
+    badge = filter_item.get("badge") if isinstance(filter_item, dict) else None
 
     # Fetch a large batch to seed as many existing IDs as possible
     try:
@@ -351,6 +367,9 @@ async def _seed_and_show(
     if mil_range:
         lo, hi = mil_range
         seed_cars = [c for c in seed_cars if lo <= (c.get("Mileage") or 0) <= hi]
+
+    if badge:
+        seed_cars = [c for c in seed_cars if c.get("Badge", "") == badge]
 
     seen_ids: set[str] = bot_data.setdefault(
         f"seen_{user_id}", load_seen_ids(user_id)
@@ -943,7 +962,7 @@ async def on_mileage(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     f = context.user_data["filter"]
     f["mileage"] = MILEAGE_OPTIONS[int(query.data.split(":")[1])][1]
 
-    # Year is NOT sent to the API (causes 404); stored as metadata for
+    # Year and badge are NOT sent to the API; stored as metadata for
     # client-side filtering after the results are fetched.
     api_query = build_filter(
         manufacturer=f["manufacturer"],
@@ -956,7 +975,13 @@ async def on_mileage(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         mileage=f.get("mileage"),
     )
     year = f.get("year")
-    filter_item = {"q": api_query, "year": list(year)} if year else api_query
+    badge = f.get("badge")
+    meta: dict = {"q": api_query}
+    if year:
+        meta["year"] = list(year)
+    if badge:
+        meta["badge"] = badge
+    filter_item = meta if (year or badge) else api_query
 
     filters = load_filters(user_id)
     filters.append(filter_item)
@@ -1026,7 +1051,13 @@ async def on_webapp_data(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         color=payload.get("color") or None,
     )
     year = payload.get("year")
-    filter_item = {"q": api_query, "year": list(year)} if year else api_query
+    badge = payload.get("badge") or None
+    meta: dict = {"q": api_query}
+    if year:
+        meta["year"] = list(year)
+    if badge:
+        meta["badge"] = badge
+    filter_item = meta if (year or badge) else api_query
 
     filters_list = load_filters(user.id)
     filters_list.append(filter_item)
@@ -1069,9 +1100,11 @@ async def scraper_job(context: ContextTypes.DEFAULT_TYPE) -> None:
             if isinstance(filter_item, dict):
                 filter_query = filter_item["q"]
                 year_range = filter_item.get("year")
+                badge = filter_item.get("badge")
             else:
                 filter_query = filter_item
                 year_range = None
+                badge = None
 
             try:
                 cars = await asyncio.to_thread(fetch_cars, filter_query)
@@ -1087,6 +1120,9 @@ async def scraper_job(context: ContextTypes.DEFAULT_TYPE) -> None:
             if mil_range:
                 lo, hi = mil_range
                 cars = [c for c in cars if lo <= (c.get("Mileage") or 0) <= hi]
+
+            if badge:
+                cars = [c for c in cars if c.get("Badge", "") == badge]
 
             for car in cars:
                 car_id = str(car.get("Id", ""))

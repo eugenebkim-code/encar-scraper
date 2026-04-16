@@ -81,12 +81,12 @@ def build_filter(
     price=None,
     mileage=None,
 ) -> str:
-    # Year is excluded — API returns 404; apply client-side after fetching.
+    # Year and badge are excluded — apply client-side after fetching.
+    # Badge values contain dots (e.g. "2.0 MPI") which corrupt the DSL syntax.
     extra = []
     if model:
         extra.append(f"Model.{model}.")
-    if badge:
-        extra.append(f"Badge.{badge}.")
+    # badge intentionally omitted from API query
     if fuel_type:
         extra.append(f"FuelType.{fuel_type}.")
     if region:
