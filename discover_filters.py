@@ -29,6 +29,7 @@ DOMESTIC = [
     "기아", "현대", "제네시스",
     "르노코리아(삼성)",  # Renault Korea (formerly Samsung)
     "KG모빌리티(쌍용)", # KG Mobility (formerly SsangYong)
+    "쉐보레",           # Chevrolet
     "기타",             # Other domestic manufacturers
 ]
 
