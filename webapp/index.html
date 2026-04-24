@@ -159,7 +159,7 @@ const { createApp, ref, computed, watch, onMounted } = Vue;
 const MFR_EN = {
   // 국산
   "기아":"Kia","현대":"Hyundai","제네시스":"Genesis",
-  "르노코리아(삼성)":"Renault Korea","KG모빌리티(쌍용)":"KG Mobility","쉐보레":"Chevrolet","기타":"Other (Domestic)",
+  "르노코리아(삼성)":"Renault Korea","KG모빌리티(쌍용)":"KG Mobility","쉐보레(GM대우)":"Chevrolet","기타":"Other (Domestic)",
   // 독일
   "BMW":"BMW","벤츠":"Mercedes-Benz","아우디":"Audi","폭스바겐":"Volkswagen",
   "포르쉐":"Porsche","미니":"MINI","스마트":"Smart","마이바흐":"Maybach","오펠":"Opel",
@@ -208,6 +208,19 @@ const MODEL_NAMES = {
   "쏘렌토":"Sorento","카니발":"Carnival","스팅어":"Stinger","셀토스":"Seltos","니로":"Niro",
   "스토닉":"Stonic","레이":"Ray","모닝":"Morning","모하비":"Mohave","쏘울":"Soul",
   "오피러스":"Opirus","에쿠스":"Equus","제네시스":"Genesis (model)",
+  // Chevrolet / GM Daewoo
+  "스파크":"Spark","말리부":"Malibu","트랙스":"Trax","올란도":"Orlando",
+  "크루즈":"Cruze","크루즈5":"Cruze5","트레일블레이저":"Trailblazer","콜로라도":"Colorado",
+  "트래버스":"Traverse","캡티바":"Captiva","임팔라":"Impala","아베오":"Aveo",
+  "알페온":"Alpheon","라보":"Labo","이쿼녹스":"Equinox","마티즈":"Matiz",
+  "다마스":"Damas","카마로":"Camaro","라세티":"Lacetti","타호":"Tahoe",
+  "아카디아":"Arcadia","윈스톰":"Winstorm","티코":"Tico","에스페로":"Espero",
+  "토스카":"Tosca","레조":"Rezo","매그너스":"Magnus","베리타스":"Veritas",
+  "스테이츠맨":"Statesman","젠트라":"Zentra","프린스":"Prince","라노스":"Lanos",
+  "르망":"Le Mans","넥시아":"Nexia","누비라":"Nubira","레간자":"Leganza",
+  "로얄 살롱":"Royal Salon","스타일리쉬":"Stylish","브로엄":"Brougham",
+  "슈퍼 살롱":"Super Salon","시에로":"Ciero","임페리얼":"Imperial",
+  "칼로스":"Carlos","콜벳":"Corvette",
 };
 
 function translateModel(name) {

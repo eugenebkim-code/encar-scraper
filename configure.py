@@ -13,7 +13,7 @@ FILTERS_FILE = os.path.join(os.path.dirname(__file__), "filters.json")
 CATALOG_FILE = os.path.join(os.path.dirname(__file__), "catalog.json")
 
 MANUFACTURERS_FALLBACK = [
-    "기아", "현대", "제네시스", "쉐보레", "르노코리아", "KG모빌리티",
+    "기아", "현대", "제네시스", "쉐보레(GM대우)", "르노코리아", "KG모빌리티",
     "BMW", "Mercedes-Benz", "Audi", "Volkswagen", "Volvo",
     "Toyota", "Lexus", "Honda", "Nissan",
 ]
