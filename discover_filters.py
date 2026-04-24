@@ -29,7 +29,6 @@ DOMESTIC = [
     "기아", "현대", "제네시스",
     "르노코리아(삼성)",  # Renault Korea (formerly Samsung)
     "KG모빌리티(쌍용)", # KG Mobility (formerly SsangYong)
-    "쉐보레",           # Chevrolet
     "기타",             # Other domestic manufacturers
 ]
 
@@ -73,6 +72,7 @@ IMPORTED = [
     "미쓰오카",         # Mitsuoka
     "아큐라",           # Acura
     # 미국
+    "쉐보레",           # Chevrolet (CarType.N on Encar despite being made in Korea)
     "포드",
     "지프",
     "캐딜락",
