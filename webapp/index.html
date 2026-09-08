@@ -423,7 +423,8 @@ createApp({
         color: color.value || null,
       };
       const tg = window.Telegram?.WebApp;
-      if (!tg?.initData) {
+      const isDevPreview = !tg || new URLSearchParams(location.search).has("dev");
+      if (isDevPreview) {
         alert("Dev mode:\n" + JSON.stringify(payload, null, 2));
         return;
       }
@@ -433,7 +434,7 @@ createApp({
         const res = await fetch("/api/add_filter_tg", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ init_data: tg.initData, filter: payload }),
+          body: JSON.stringify({ init_data: tg.initData || "", filter: payload }),
         });
         const data = await res.json();
         if (data.ok) {
